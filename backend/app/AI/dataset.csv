@@ -1,0 +1,22 @@
+text,label
+"We are pleased to announce the launch of our new product lineup available next quarter. Our marketing campaign starts soon. Check our public brochure for details.",Public
+"Our company is dedicated to transparency. You can read our general user guides and customer support policies on our website.",Public
+"This is a general press release. We welcome all media inquiries at press@cipherguard.io.",Public
+"The annual corporate conference will be held in New York. All public registrants are welcome.",Public
+"The user guide explains how to configure the client interface for normal network connections.",Public
+"Welcome to the public catalog of secure document storage templates. All content is open source.",Public
+"Refer to the product datasheet for performance metrics and power requirements.",Public
+"Internal project roadmap: Q3 plan. The team should coordinate via Slack. Do not share outside the department.",Confidential
+"Meeting minutes from executive committee: discussion of new hire roles, budget constraints, and office design.",Confidential
+"Project Alpha development guideline: please review coding standards, documentation policies, and repository locations.",Confidential
+"Employee onboarding guide: instructions for HR payroll, vacation requests, and standard conduct codes.",Confidential
+"Feedback reports from client trials: issues regarding speed and user experience metrics.",Confidential
+"This document contains standard operating procedures for handling non-critical support tickets.",Confidential
+"Internal quarterly budget estimate. Department leads are requested to review expenditures.",Confidential
+"DATABASE_URL=mysql://admin:SuperSecretPassword2026@localhost:3306/cipherguard. Keep private.",Secret
+"-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDb2b8P\n-----END PRIVATE KEY-----",Secret
+"Social Security Numbers list for HR database: SSN 123-45-6789, SSN 987-65-4321.",Secret
+"AWS ACCESS KEY ID: AKIAIOSFODNN7EXAMPLE, SECRET ACCESS KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY.",Secret
+"This document is a highly sensitive corporate patent application. Trade secret regarding hybrid encryption matrices.",Secret
+"Confidential client account records. Primary target: routing number 121000248, account 998273291.",Secret
+"Master admin encryption key and hash salt configs. Salt: bcrypt$2b$12$e53j. Passphrase: decrypt.",Secret

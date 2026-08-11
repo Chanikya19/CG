@@ -1,0 +1,143 @@
+# ==============================================================================
+# CipherGuard Project .gitignore
+# Stack: React (Vite) + Python (Flask) + MySQL + Windows / Cross-Platform
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. Environment Variables & Secrets (CRITICAL)
+# ------------------------------------------------------------------------------
+.env
+.env.*
+*.env
+backend/.env
+backend/.env.*
+frontend/.env
+frontend/.env.*
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+
+# Preserve configuration templates
+!.env.example
+!**/.env.example
+!backend/.env.example
+!frontend/.env.example
+
+# ------------------------------------------------------------------------------
+# 2. Cryptographic Keys & Private Key Certificates
+# ------------------------------------------------------------------------------
+*.pem
+*.key
+*.priv
+*.private
+*.pfx
+*.p12
+id_rsa
+id_rsa.pub
+
+# ------------------------------------------------------------------------------
+# 3. Encrypted Vault Storage & Uploaded / Generated Files
+# ------------------------------------------------------------------------------
+backend/instance/
+instance/
+uploads/
+encrypted_files/
+generated_files/
+vault/
+*.enc
+*.dec
+temp/
+tmp/
+*.tmp
+*.bak
+*.swp
+
+# ------------------------------------------------------------------------------
+# 4. Database Files & Local SQLite / MySQL Dumps
+# ------------------------------------------------------------------------------
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+local_dump.sql
+
+# ------------------------------------------------------------------------------
+# 5. Python & Flask Cache / Virtual Environments
+# ------------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.pytest_cache/
+.coverage
+htmlcov/
+dist-py/
+build/
+*.egg-info/
+.eggs/
+
+# ------------------------------------------------------------------------------
+# 6. Node.js & Vite / Frontend Artifacts
+# ------------------------------------------------------------------------------
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+dist-ssr/
+frontend/dist-ssr/
+.npm/
+*.tsbuildinfo
+.eslintcache
+
+# ------------------------------------------------------------------------------
+# 7. Logs
+# ------------------------------------------------------------------------------
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ------------------------------------------------------------------------------
+# 8. Archive & Backup Files
+# ------------------------------------------------------------------------------
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+
+# ------------------------------------------------------------------------------
+# 9. Operating System & Windows Artifacts
+# ------------------------------------------------------------------------------
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# ------------------------------------------------------------------------------
+# 10. IDEs and Editor Configuration
+# ------------------------------------------------------------------------------
+.idea/
+.vscode/*
+!.vscode/launch.json
+!.vscode/extensions.json
+*.sublime-project
+*.sublime-workspace
