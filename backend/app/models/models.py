@@ -11,6 +11,8 @@ class User(db.Model):
     two_factor_secret = db.Column(db.String(100), nullable=True)
     role = db.Column(db.Enum('admin', 'user'), nullable=False, default='user')
     status = db.Column(db.Enum('active', 'suspended'), nullable=False, default='active')
+    failed_login_attempts = db.Column(db.Integer, nullable=False, default=0)
+    lockout_until = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
     
@@ -55,6 +57,7 @@ class EncryptionKey(db.Model):
     iv_or_nonce = db.Column(db.String(100), nullable=False)
     tag = db.Column(db.String(100), nullable=True)
     encryption_time_ms = db.Column(db.Float, nullable=True, default=0.0)
+    version = db.Column(db.Integer, nullable=False, default=1)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
 

@@ -86,7 +86,7 @@ def register_user():
             "role": new_user.role
         },
         "public_key": public_pem.decode('utf-8'),
-        "private_key": private_pem.decode('utf-8') # Return private key for download
+        "private_key": "Secured on Server (Not exposed to client)"
     }), 201
 
 def login_user():
@@ -168,6 +168,9 @@ def decrypt_endpoint(current_user):
     tag = data.get('tag')
     private_key = data.get('private_key')
 
+    if not private_key or private_key.startswith("Secured on Server"):
+        private_key = current_user.rsa_private_key
+
     if not all([ciphertext, encrypted_key, iv, tag, private_key]):
         return jsonify({"error": "Missing required hybrid parameters"}), 400
 
@@ -178,7 +181,7 @@ def decrypt_endpoint(current_user):
         )
         return jsonify({"plaintext": decrypted_bytes.decode('utf-8')}), 200
     except Exception as e:
-        return jsonify({"error": f"Decryption failed: {str(e)}"}), 400
+        return jsonify({"error": "Decryption failed. Invalid keys, corrupted payload, or authentication failure."}), 400
 
 # ==========================================
 # 3. DLP & Upload Controller
@@ -355,7 +358,8 @@ def upload_file_endpoint(current_user):
             key_type=enc_pack["key_type"],
             iv_or_nonce=enc_pack["iv_or_nonce"],
             tag=enc_pack["tag"],
-            encryption_time_ms=enc_pack["duration_ms"]
+            encryption_time_ms=enc_pack["duration_ms"],
+            version=2
         )
         db.session.add(new_key)
 
@@ -659,7 +663,7 @@ def keys_generate(current_user):
 
         return jsonify({
             "public_key": current_user.rsa_public_key,
-            "private_key": current_user.rsa_private_key
+            "private_key": "Secured on Server (Not exposed to client)"
         }), 200
     except Exception as e:
         return jsonify({"error": f"Failed to generate keypair: {str(e)}"}), 500
@@ -674,7 +678,7 @@ def keys_current(current_user):
             
         return jsonify({
             "public_key": current_user.rsa_public_key,
-            "private_key": current_user.rsa_private_key
+            "private_key": "Secured on Server (Not exposed to client)"
         }), 200
     except Exception as e:
         return jsonify({"error": f"Failed to retrieve current keys: {str(e)}"}), 500
@@ -721,6 +725,9 @@ def download_file_decrypted(current_user, file_id):
     else:
         private_key_pem = request.form.get('private_key')
 
+    if not private_key_pem or private_key_pem.startswith("Secured on Server"):
+        private_key_pem = current_user.rsa_private_key
+
     classification = file.classification.classification_label if file.classification else 'Confidential'
     
     # Validation for Secret files
@@ -751,7 +758,8 @@ def download_file_decrypted(current_user, file_id):
             encrypted_file_key_b64=enc_key.encrypted_file_key,
             iv_b64=enc_key.iv_or_nonce,
             tag_b64=enc_key.tag,
-            user_private_key_pem=private_key_pem
+            user_private_key_pem=private_key_pem,
+            version=getattr(enc_key, 'version', 1)
         )
 
         log_event(
@@ -783,7 +791,7 @@ def download_file_decrypted(current_user, file_id):
             details={"filename": file.filename, "error": str(e)},
             status='failed'
         )
-        return jsonify({"error": f"Decryption failed: {str(e)}"}), 400
+        return jsonify({"error": "Decryption failed. Invalid keys, corrupted payload, or authentication failure."}), 400
 
 # ==========================================
 # 7. File Integrity & Secure Sharing (Module 4)
@@ -1033,6 +1041,9 @@ def download_shared_file(token):
     else:
         private_key_pem = request.form.get('private_key')
 
+    if not private_key_pem or private_key_pem.startswith("Secured on Server"):
+        private_key_pem = file.owner.rsa_private_key
+
     classification = file.classification.classification_label if file.classification else 'Confidential'
     if classification == 'Secret' and not private_key_pem:
         if file.owner.rsa_private_key:
@@ -1072,7 +1083,8 @@ def download_shared_file(token):
             encrypted_file_key_b64=file.keys[0].encrypted_file_key if file.keys else "",
             iv_b64=file.keys[0].iv_or_nonce if file.keys else "",
             tag_b64=file.keys[0].tag if file.keys else "",
-            user_private_key_pem=private_key_pem
+            user_private_key_pem=private_key_pem,
+            version=getattr(file.keys[0], 'version', 1) if file.keys else 1
         )
 
         log_event(
@@ -1091,7 +1103,7 @@ def download_shared_file(token):
         return response
 
     except Exception as e:
-        return jsonify({"error": f"Decryption failed: {str(e)}"}), 400
+        return jsonify({"error": "Decryption failed. Invalid keys, corrupted payload, or authentication failure."}), 400
 
 def revoke_shared_link(current_user, share_id):
     share = FileSharing.query.filter_by(id=share_id, owner_id=current_user.id).first()

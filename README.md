@@ -167,3 +167,25 @@ Tables will automatically be created in `backend/instance/cipherguard.db` upon i
    ```
    *Vite is pre-configured with a proxy routing all `/api/*` calls directly to `http://localhost:5000`.*
 
+---
+
+## 🔒 Cryptographic Specifications
+
+CipherGuard uses a hardened hybrid cryptosystem combining symmetric speed and asymmetric key distribution:
+
+1. **AES-256-GCM (Symmetric Encryption)**:
+   - All files are encrypted using 256-bit AES in Galois/Counter Mode (GCM).
+   - Generates a cryptographically secure random key (DEK) and a unique 12-byte initialization vector (IV) for every file.
+   - Authenticates ciphertext payloads to prevent bit-flipping attacks. Validation of the 16-byte authentication tag is enforced strictly on decryption.
+
+2. **RSA-2048-OAEP (Asymmetric Key Protection)**:
+   - Protects and wraps the symmetric DEK using a 2048-bit RSA keypair.
+   - Uses Optimal Asymmetric Encryption Padding (OAEP) with SHA-256 hashing and MGF1 (Mask Generation Function) with SHA-256 to mitigate padding-oracle attacks.
+
+3. **Hybrid Cryptosystem Workflow**:
+   - **Encryption**: File payload is encrypted via AES-256-GCM under a random DEK. The DEK is then wrapped (encrypted) with the user's RSA-2048 public key.
+   - **Decryption**: The wrapped DEK is unwrapped using the user's RSA-2048 private key. The unwrapped DEK is then used to decrypt the file payload.
+
+4. **Zero-Knowledge Key Isolation**:
+   - Private RSA keys are securely retained on the backend database and masked with placeholders in all client-facing API responses.
+   - Client-side decryption falls back to server-side keys without exposing private key materials to the browser.

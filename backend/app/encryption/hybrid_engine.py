@@ -56,7 +56,7 @@ def get_server_master_key():
 def encrypt_by_sensitivity(file_bytes, sensitivity, user_public_key_pem):
     """
     Encrypts file bytes based on sensitivity classification:
-    - Public -> AES-128 GCM, key wrapped with server master key.
+    - Public -> AES-256 GCM, key wrapped with server master key.
     - Confidential -> AES-256 GCM, key wrapped with server master key.
     - Secret -> AES-256 GCM, key wrapped with user RSA-2048 public key.
     """
@@ -64,13 +64,13 @@ def encrypt_by_sensitivity(file_bytes, sensitivity, user_public_key_pem):
     server_master_key = get_server_master_key()
 
     if sensitivity == 'Public':
-        key_size = 128
+        key_size = 256
         dek = generate_aes_key(key_size)
         ciphertext, iv, tag = encrypt_aes_gcm(dek, file_bytes)
         # Wrap DEK using server master key
         wrapped_dek, wrap_iv, wrap_tag = encrypt_aes_gcm(server_master_key, dek)
         encrypted_file_key_b64 = base64.b64encode(wrap_iv + wrap_tag + wrapped_dek).decode('utf-8')
-        key_type = 'AES-128-GCM'
+        key_type = 'AES-256-GCM'
     elif sensitivity == 'Confidential':
         key_size = 256
         dek = generate_aes_key(key_size)
@@ -101,10 +101,11 @@ def encrypt_by_sensitivity(file_bytes, sensitivity, user_public_key_pem):
         "tag": base64.b64encode(tag).decode('utf-8'),
         "key_type": key_type,
         "key_size": key_size,
-        "duration_ms": duration_ms
+        "duration_ms": duration_ms,
+        "version": 2
     }
 
-def decrypt_by_sensitivity(ciphertext_bytes, sensitivity, encrypted_file_key_b64, iv_b64, tag_b64, user_private_key_pem):
+def decrypt_by_sensitivity(ciphertext_bytes, sensitivity, encrypted_file_key_b64, iv_b64, tag_b64, user_private_key_pem, version=1):
     """
     Decrypts ciphertext bytes based on sensitivity:
     - Public/Confidential -> DEK unwrapped with server master key.
