@@ -20,6 +20,8 @@ export default function SecureSharing() {
   const [selectedFile, setSelectedFile] = useState('');
   const [duration, setDuration] = useState('24');
   const [sharingHistory, setSharingHistory] = useState([]);
+  const [maxDownloads, setMaxDownloads] = useState('');
+  const [oneTime, setOneTime] = useState(false);
 
   const [loadingFiles, setLoadingFiles] = useState(true);
   const [sharing, setSharing] = useState(false);
@@ -60,13 +62,17 @@ export default function SecureSharing() {
     setErrorMsg('');
     setSuccessMsg('');
     try {
-      const data = await shareAPI.shareFile(selectedFile, duration);
+      const downloadsLimit = oneTime ? 1 : (maxDownloads ? parseInt(maxDownloads) : null);
+      const data = await shareAPI.shareFile(selectedFile, duration, downloadsLimit);
       setSuccessMsg(`Secure share link generated successfully!`);
       await loadData();
       
       setActiveQrCode(data.qr_code);
       setActiveShareLink(data.share_link);
       setShowQrModal(true);
+      // Reset limit inputs
+      setMaxDownloads('');
+      setOneTime(false);
     } catch (err) {
       console.error(err);
       setErrorMsg(err.response?.data?.error || 'Failed to authorize sharing policy.');
@@ -168,6 +174,38 @@ export default function SecureSharing() {
                 </select>
               </div>
 
+              <div className="flex items-center gap-2 py-1">
+                <input 
+                  type="checkbox"
+                  id="oneTime"
+                  checked={oneTime}
+                  onChange={(e) => {
+                    setOneTime(e.target.checked);
+                    if (e.target.checked) setMaxDownloads('');
+                  }}
+                  className="rounded border-gray-800 bg-white/5 text-purple-600 focus:ring-purple-500 w-4 h-4"
+                />
+                <label htmlFor="oneTime" className="text-xs text-gray-300 select-none cursor-pointer">
+                  One-time download only
+                </label>
+              </div>
+
+              {!oneTime && (
+                <div className="space-y-2">
+                  <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                    Max Downloads Limit (Optional)
+                  </label>
+                  <input 
+                    type="number"
+                    min="1"
+                    placeholder="Unlimited"
+                    value={maxDownloads}
+                    onChange={(e) => setMaxDownloads(e.target.value)}
+                    className="w-full py-2.5 px-3 rounded-xl glass-input text-xs text-gray-300"
+                  />
+                </div>
+              )}
+
               <button
                 type="submit"
                 disabled={sharing || !selectedFile}
@@ -208,13 +246,14 @@ export default function SecureSharing() {
                       <th className="pb-3">File Asset</th>
                       <th className="pb-3">Share Link</th>
                       <th className="pb-3">Expiry Deadline</th>
+                      <th className="pb-3">Downloads</th>
                       <th className="pb-3">Status</th>
                       <th className="pb-3 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-800/40">
                     {sharingHistory.map((share) => {
-                      const shareLink = `http://localhost:5173/shared/${share.share_token}`;
+                      const shareLink = share.share_link || `http://localhost:5173/shared/${share.share_token}`;
                       return (
                         <tr key={share.id} className="group hover:bg-white/5 transition-all text-xs">
                           <td className="py-4 font-semibold text-white flex items-center gap-2 max-w-[120px] truncate" title={share.filename}>
@@ -241,6 +280,9 @@ export default function SecureSharing() {
                           </td>
                           <td className="py-4 font-mono text-[9px] text-gray-400">
                             {share.expiry_time}
+                          </td>
+                          <td className="py-4 font-mono text-[9px] text-gray-400">
+                            {share.downloads_count} / {share.max_downloads !== null && share.max_downloads !== undefined ? share.max_downloads : '∞'}
                           </td>
                           <td className="py-4">
                             <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${

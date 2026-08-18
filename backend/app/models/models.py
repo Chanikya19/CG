@@ -94,6 +94,8 @@ class FileSharing(db.Model):
     qr_code = db.Column(db.Text, nullable=True)
     expiry_time = db.Column(db.DateTime, nullable=False)
     status = db.Column(db.Enum('active', 'revoked', 'expired'), nullable=False, default='active')
+    max_downloads = db.Column(db.Integer, nullable=True)
+    downloads_count = db.Column(db.Integer, nullable=False, default=0)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
 

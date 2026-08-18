@@ -137,8 +137,12 @@ export const integrityAPI = {
 };
 
 export const shareAPI = {
-  shareFile: async (fileId, expiryHours) => {
-    const res = await apiClient.post('/share-file', { file_id: fileId, expiry_hours: Number(expiryHours) });
+  shareFile: async (fileId, expiryHours, maxDownloads = null) => {
+    const res = await apiClient.post('/share-file', { 
+      file_id: fileId, 
+      expiry_hours: Number(expiryHours),
+      max_downloads: maxDownloads 
+    });
     return res.data;
   },
   getSharedHistory: async () => {

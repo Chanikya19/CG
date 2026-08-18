@@ -134,13 +134,23 @@ export default function SharedLinkResolver() {
             )}
 
             {/* Share details metadata */}
-            <div className="flex justify-between items-center bg-white/5 border border-gray-800 p-3 rounded-2xl text-[10px]">
-              <span className="text-gray-400 flex items-center gap-1">
-                <Clock className="w-3.5 h-3.5" /> Expiry Deadline
-              </span>
-              <span className="font-mono text-purple-300 font-bold">
-                {shareData.expiry_time}
-              </span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[10px]">
+              <div className="flex justify-between items-center bg-white/5 border border-gray-800 p-3 rounded-2xl">
+                <span className="text-gray-400 flex items-center gap-1">
+                  <Clock className="w-3.5 h-3.5" /> Expiry Deadline
+                </span>
+                <span className="font-mono text-purple-300 font-bold">
+                  {shareData.expiry_time}
+                </span>
+              </div>
+              <div className="flex justify-between items-center bg-white/5 border border-gray-800 p-3 rounded-2xl">
+                <span className="text-gray-400 flex items-center gap-1">
+                  <DownloadCloud className="w-3.5 h-3.5" /> Downloads Limit
+                </span>
+                <span className="font-mono text-blue-300 font-bold">
+                  {shareData.file.downloads_count} / {shareData.file.max_downloads !== null && shareData.file.max_downloads !== undefined ? shareData.file.max_downloads : '∞'}
+                </span>
+              </div>
             </div>
 
             {/* Download Logic */}
@@ -190,7 +200,7 @@ export default function SharedLinkResolver() {
               </form>
             )}
 
-            {shareData.file.integrity_status === "Tampered" && (
+            {shareData.file.integrity_status?.toUpperCase() === "TAMPERED" && (
               <button
                 disabled
                 className="w-full py-3.5 rounded-xl bg-gray-900 border border-gray-800 text-xs font-semibold text-gray-600 cursor-not-allowed flex items-center justify-center gap-1.5"

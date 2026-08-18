@@ -19,6 +19,9 @@ class Config:
     # Upload size limit (10 MB)
     MAX_CONTENT_LENGTH = 10 * 1024 * 1024
     
+    # Base URL for secure file share links
+    SHARE_BASE_URL = os.environ.get('SHARE_BASE_URL', 'http://localhost:5173')
+    
     # AI Classification Model settings
     MODEL_PATH = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 

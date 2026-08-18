@@ -1004,6 +1004,7 @@ def share_file_endpoint(current_user):
     data = request.get_json() or {}
     file_id = data.get('file_id')
     expiry_hours = data.get('expiry_hours', 24)
+    max_downloads = data.get('max_downloads')
 
     if not file_id:
         return jsonify({"error": "Missing file_id"}), 400
@@ -1012,12 +1013,22 @@ def share_file_endpoint(current_user):
     if not file:
         return jsonify({"error": "File not found or access denied"}), 404
 
+    # Validate max_downloads if present
+    if max_downloads is not None:
+        try:
+            max_downloads = int(max_downloads)
+            if max_downloads <= 0:
+                raise ValueError()
+        except (ValueError, TypeError):
+            return jsonify({"error": "max_downloads must be a positive integer"}), 400
+
     try:
         token = secrets.token_urlsafe(32)
         expiry_time = datetime.utcnow() + timedelta(hours=int(expiry_hours))
         
-        # Share link points to frontend public SharedResolver page
-        share_link = f"http://localhost:5173/shared/{token}"
+        # Share link points to frontend public SharedResolver page dynamically configured
+        share_base = current_app.config.get('SHARE_BASE_URL', 'http://localhost:5173')
+        share_link = f"{share_base}/shared/{token}"
 
         # Generate base64 QR Code
         qr = qrcode.QRCode(version=1, box_size=10, border=3)
@@ -1034,17 +1045,24 @@ def share_file_endpoint(current_user):
             share_token=token,
             qr_code=qr_code_base64,
             expiry_time=expiry_time,
-            status='active'
+            status='active',
+            max_downloads=max_downloads,
+            downloads_count=0
         )
         db.session.add(new_share)
         db.session.commit()
 
         log_event(
             user_id=current_user.id,
-            action='FILE_SHARE',
+            action='SHARE_CREATED',
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
-            details={"filename": file.filename, "token": token, "expiry_hours": expiry_hours},
+            details={
+                "filename": file.filename, 
+                "token": token, 
+                "expiry_hours": expiry_hours, 
+                "max_downloads": max_downloads
+            },
             status='success'
         )
 
@@ -1054,7 +1072,9 @@ def share_file_endpoint(current_user):
             "share_token": token,
             "share_link": share_link,
             "qr_code": qr_code_base64,
-            "expiry_time": expiry_time.strftime('%Y-%m-%d %H:%M:%S')
+            "expiry_time": expiry_time.strftime('%Y-%m-%d %H:%M:%S'),
+            "max_downloads": max_downloads,
+            "downloads_count": 0
         }), 201
     except Exception as e:
         return jsonify({"error": f"Failed to generate share link: {str(e)}"}), 500
@@ -1062,19 +1082,65 @@ def share_file_endpoint(current_user):
 def resolve_shared_link(token):
     share = FileSharing.query.filter_by(share_token=token).first()
     if not share:
+        # Log failed access
+        log_event(
+            user_id=None,
+            action='SHARE_FAILED_ACCESS',
+            ip_address=request.remote_addr,
+            user_agent=request.user_agent.string,
+            details={"token": token, "reason": "Sharing link is invalid or not found"},
+            status='failed'
+        )
         return jsonify({"error": "Sharing link is invalid or not found"}), 404
+
+    if share.max_downloads is not None and share.downloads_count >= share.max_downloads:
+        share.status = 'expired'
+        db.session.commit()
+        log_event(
+            user_id=share.owner_id,
+            action='SHARE_FAILED_ACCESS',
+            ip_address=request.remote_addr,
+            user_agent=request.user_agent.string,
+            details={"token": token, "reason": "Download limit has been exceeded"},
+            status='failed'
+        )
+        return jsonify({"error": "This sharing link has exceeded its download limit"}), 403
 
     # Validate active state and expiry
     if share.status != 'active':
+        log_event(
+            user_id=share.owner_id,
+            action='SHARE_FAILED_ACCESS',
+            ip_address=request.remote_addr,
+            user_agent=request.user_agent.string,
+            details={"token": token, "reason": f"This sharing link has been {share.status}"},
+            status='failed'
+        )
         return jsonify({"error": f"This sharing link has been {share.status}"}), 403
 
     if share.expiry_time < datetime.utcnow():
         share.status = 'expired'
         db.session.commit()
+        log_event(
+            user_id=share.owner_id,
+            action='SHARE_FAILED_ACCESS',
+            ip_address=request.remote_addr,
+            user_agent=request.user_agent.string,
+            details={"token": token, "reason": "This sharing link has expired"},
+            status='failed'
+        )
         return jsonify({"error": "This sharing link has expired"}), 403
 
     file = share.file
     if not file:
+        log_event(
+            user_id=share.owner_id,
+            action='SHARE_FAILED_ACCESS',
+            ip_address=request.remote_addr,
+            user_agent=request.user_agent.string,
+            details={"token": token, "reason": "Shared file metadata no longer exists"},
+            status='failed'
+        )
         return jsonify({"error": "Shared file metadata no longer exists"}), 404
 
     # Run dynamic integrity check on ciphertext bytes
@@ -1082,6 +1148,14 @@ def resolve_shared_link(token):
     file_path = os.path.join(vault_dir, f"{file.checksum}.enc")
     
     if not os.path.exists(file_path):
+        log_event(
+            user_id=share.owner_id,
+            action='SHARE_FAILED_ACCESS',
+            ip_address=request.remote_addr,
+            user_agent=request.user_agent.string,
+            details={"token": token, "reason": "Encrypted file payload missing from vault storage"},
+            status='failed'
+        )
         return jsonify({"error": "Encrypted file payload missing from vault storage"}), 404
 
     try:
@@ -1095,6 +1169,15 @@ def resolve_shared_link(token):
         is_intact = verify_sha256(ciphertext_bytes, stored_hash) if stored_hash else True
         integrity_status = "VERIFIED" if is_intact else "TAMPERED"
 
+        log_event(
+            user_id=share.owner_id,
+            action='SHARE_ACCESSED',
+            ip_address=request.remote_addr,
+            user_agent=request.user_agent.string,
+            details={"token": token, "filename": file.filename},
+            status='success'
+        )
+
         return jsonify({
             "file": {
                 "id": file.id,
@@ -1102,7 +1185,9 @@ def resolve_shared_link(token):
                 "file_size": f"{round(file.file_size / 1024, 1)} KB",
                 "classification": file.classification.classification_label if file.classification else 'Confidential',
                 "checksum": file.checksum,
-                "integrity_status": integrity_status
+                "integrity_status": integrity_status,
+                "max_downloads": share.max_downloads,
+                "downloads_count": share.downloads_count
             },
             "owner": share.file.owner.full_name,
             "expiry_time": share.expiry_time.strftime('%Y-%m-%d %H:%M:%S'),
@@ -1114,18 +1199,63 @@ def resolve_shared_link(token):
 def download_shared_file(token):
     share = FileSharing.query.filter_by(share_token=token).first()
     if not share:
+        log_event(
+            user_id=None,
+            action='SHARE_FAILED_ACCESS',
+            ip_address=request.remote_addr,
+            user_agent=request.user_agent.string,
+            details={"token": token, "reason": "Sharing link is invalid or not found"},
+            status='failed'
+        )
         return jsonify({"error": "Sharing link is invalid or not found"}), 404
 
+    if share.max_downloads is not None and share.downloads_count >= share.max_downloads:
+        share.status = 'expired'
+        db.session.commit()
+        log_event(
+            user_id=share.owner_id,
+            action='SHARE_FAILED_ACCESS',
+            ip_address=request.remote_addr,
+            user_agent=request.user_agent.string,
+            details={"token": token, "reason": "Download limit has been exceeded"},
+            status='failed'
+        )
+        return jsonify({"error": "This sharing link has exceeded its download limit"}), 403
+
     if share.status != 'active':
+        log_event(
+            user_id=share.owner_id,
+            action='SHARE_FAILED_ACCESS',
+            ip_address=request.remote_addr,
+            user_agent=request.user_agent.string,
+            details={"token": token, "reason": f"This sharing link has been {share.status}"},
+            status='failed'
+        )
         return jsonify({"error": f"This sharing link has been {share.status}"}), 403
 
     if share.expiry_time < datetime.utcnow():
         share.status = 'expired'
         db.session.commit()
+        log_event(
+            user_id=share.owner_id,
+            action='SHARE_FAILED_ACCESS',
+            ip_address=request.remote_addr,
+            user_agent=request.user_agent.string,
+            details={"token": token, "reason": "This sharing link has expired"},
+            status='failed'
+        )
         return jsonify({"error": "This sharing link has expired"}), 403
 
     file = share.file
     if not file:
+        log_event(
+            user_id=share.owner_id,
+            action='SHARE_FAILED_ACCESS',
+            ip_address=request.remote_addr,
+            user_agent=request.user_agent.string,
+            details={"token": token, "reason": "Shared file metadata no longer exists"},
+            status='failed'
+        )
         return jsonify({"error": "Shared file metadata no longer exists"}), 404
 
     # Extract private key (demo uses fallback in zero-knowledge mode)
@@ -1144,12 +1274,28 @@ def download_shared_file(token):
         if file.owner.rsa_private_key:
             private_key_pem = file.owner.rsa_private_key
         else:
+            log_event(
+                user_id=share.owner_id,
+                action='SHARE_FAILED_ACCESS',
+                ip_address=request.remote_addr,
+                user_agent=request.user_agent.string,
+                details={"token": token, "reason": "Private decryption key is required to decrypt this Secret file"},
+                status='failed'
+            )
             return jsonify({"error": "Private decryption key is required to decrypt this Secret file"}), 400
 
     vault_dir = os.path.join(current_app.instance_path, 'vault')
     file_path = os.path.join(vault_dir, f"{file.checksum}.enc")
     
     if not os.path.exists(file_path):
+        log_event(
+            user_id=share.owner_id,
+            action='SHARE_FAILED_ACCESS',
+            ip_address=request.remote_addr,
+            user_agent=request.user_agent.string,
+            details={"token": token, "reason": "Encrypted file payload missing from vault"},
+            status='failed'
+        )
         return jsonify({"error": "Encrypted file payload missing from vault"}), 404
 
     try:
@@ -1163,11 +1309,11 @@ def download_shared_file(token):
             if not verify_sha256(ciphertext_bytes, integrity.sha256_hash):
                 log_event(
                     user_id=file.owner_id,
-                    action='SHARE_TAMPER_BLOCK',
+                    action='SHARE_FAILED_ACCESS',
                     ip_address=request.remote_addr,
                     user_agent=request.user_agent.string,
-                    details={"filename": file.filename, "message": "Download blocked: file hash did not match FileIntegrity signature"},
-                    status='blocked'
+                    details={"filename": file.filename, "token": token, "reason": "Security Block: File integrity check failed. Document has been tampered with!"},
+                    status='failed'
                 )
                 return jsonify({"error": "Security Block: File integrity check failed. Document has been tampered with!"}), 400
 
@@ -1182,12 +1328,26 @@ def download_shared_file(token):
             version=getattr(file.keys[0], 'version', 1) if file.keys else 1
         )
 
+        # Increment download counter and auto-expire if limit met
+        share.downloads_count += 1
+        if share.max_downloads is not None and share.downloads_count >= share.max_downloads:
+            share.status = 'expired'
+            log_event(
+                user_id=share.owner_id,
+                action='SHARE_EXPIRED',
+                ip_address=request.remote_addr,
+                user_agent=request.user_agent.string,
+                details={"filename": file.filename, "token": token, "reason": "Download limit reached"},
+                status='success'
+            )
+        db.session.commit()
+
         log_event(
             user_id=file.owner_id,
-            action='SHARE_DOWNLOAD',
+            action='SHARE_DOWNLOAD_COMPLETED',
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
-            details={"filename": file.filename, "token": token},
+            details={"filename": file.filename, "token": token, "downloads_count": share.downloads_count},
             status='success'
         )
 
@@ -1198,6 +1358,14 @@ def download_shared_file(token):
         return response
 
     except Exception as e:
+        log_event(
+            user_id=share.owner_id,
+            action='SHARE_FAILED_ACCESS',
+            ip_address=request.remote_addr,
+            user_agent=request.user_agent.string,
+            details={"token": token, "reason": f"Decryption failed: {str(e)}"},
+            status='failed'
+        )
         return jsonify({"error": "Decryption failed. Invalid keys, corrupted payload, or authentication failure."}), 400
 
 def revoke_shared_link(current_user, share_id):
@@ -1211,7 +1379,7 @@ def revoke_shared_link(current_user, share_id):
 
         log_event(
             user_id=current_user.id,
-            action='SHARE_REVOKE',
+            action='SHARE_REVOKED',
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
             details={"share_id": share_id, "file_id": share.file_id},
@@ -1227,19 +1395,30 @@ def get_shared_history(current_user):
     history = []
     for s in sharings:
         status = s.status
-        if status == 'active' and s.expiry_time < datetime.utcnow():
-            s.status = 'expired'
-            db.session.commit()
-            status = 'expired'
+        if status == 'active':
+            if s.expiry_time < datetime.utcnow():
+                s.status = 'expired'
+                db.session.commit()
+                status = 'expired'
+            elif s.max_downloads is not None and s.downloads_count >= s.max_downloads:
+                s.status = 'expired'
+                db.session.commit()
+                status = 'expired'
+
+        share_base = current_app.config.get('SHARE_BASE_URL', 'http://localhost:5173')
+        share_link = f"{share_base}/shared/{s.share_token}"
 
         history.append({
             "id": s.id,
             "file_id": s.file_id,
             "filename": s.file.filename if s.file else 'Unknown File',
             "share_token": s.share_token,
+            "share_link": share_link,
             "qr_code": s.qr_code,
             "expiry_time": s.expiry_time.strftime('%Y-%m-%d %H:%M:%S'),
             "status": status,
+            "max_downloads": s.max_downloads,
+            "downloads_count": s.downloads_count,
             "created_at": s.created_at.strftime('%Y-%m-%d %H:%M:%S')
         })
     return jsonify(history), 200

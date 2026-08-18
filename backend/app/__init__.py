@@ -45,4 +45,12 @@ def create_app(config_class=Config):
         except Exception:
             db.session.rollback()
 
+        # Gracefully add max_downloads and downloads_count to FileSharing if not present
+        try:
+            db.session.execute(db.text("ALTER TABLE FileSharing ADD COLUMN max_downloads INT DEFAULT NULL"))
+            db.session.execute(db.text("ALTER TABLE FileSharing ADD COLUMN downloads_count INT DEFAULT 0"))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
     return app
