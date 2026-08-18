@@ -53,4 +53,11 @@ def create_app(config_class=Config):
         except Exception:
             db.session.rollback()
 
+        # Gracefully add file_id to ActivityLogs if not present
+        try:
+            db.session.execute(db.text("ALTER TABLE ActivityLogs ADD COLUMN file_id INT DEFAULT NULL"))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
     return app

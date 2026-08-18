@@ -141,7 +141,7 @@ class TestCipherGuardSharing(unittest.TestCase):
             self.assertTrue(data["qr_code"].startswith("data:image/png;base64,"))
 
         # Assert share creation logged
-        log = ActivityLog.query.filter_by(action='SHARE_CREATED').first()
+        log = ActivityLog.query.filter_by(action='FILE_SHARED').first()
         self.assertIsNotNone(log)
         self.assertEqual(log.details["max_downloads"], 5)
 

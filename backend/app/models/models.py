@@ -107,6 +107,7 @@ class ActivityLog(db.Model):
     action = db.Column(db.String(100), nullable=False)
     module = db.Column(db.String(100), nullable=False, default='General')
     file_name = db.Column(db.String(255), nullable=True)
+    file_id = db.Column(db.Integer, db.ForeignKey('Files.id', ondelete='SET NULL'), nullable=True)
     ip_address = db.Column(db.String(45), nullable=False)
     user_agent = db.Column(db.String(255), nullable=True)
     details = db.Column(db.JSON, nullable=True)

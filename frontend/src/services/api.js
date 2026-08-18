@@ -62,7 +62,12 @@ export const authAPI = {
     const res = await apiClient.get('/profile');
     return res.data;
   },
-  logout: () => {
+  logout: async () => {
+    try {
+      await apiClient.post('/logout');
+    } catch (err) {
+      console.warn("Server logout registration failed", err);
+    }
     localStorage.removeItem('cipherguard_token');
     localStorage.removeItem('cipherguard_user');
     sessionStorage.removeItem('cipherguard_token');
@@ -170,8 +175,12 @@ export const auditAPI = {
     const res = await apiClient.get('/dashboard');
     return res.data;
   },
-  getLogs: async (search = '', module = 'ALL', status = 'ALL') => {
-    const res = await apiClient.get(`/logs?search=${encodeURIComponent(search)}&module=${module}&status=${status}`);
+  getLogs: async (search = '', module = 'ALL', status = 'ALL', userId = 'ALL', action = 'ALL', startDate = '', endDate = '', page = 1, perPage = 20) => {
+    const res = await apiClient.get(`/logs?search=${encodeURIComponent(search)}&module=${module}&status=${status}&user_id=${userId}&action=${action}&start_date=${startDate}&end_date=${endDate}&page=${page}&per_page=${perPage}`);
+    return res.data;
+  },
+  getUsers: async () => {
+    const res = await apiClient.get('/admin/users');
     return res.data;
   },
   getSecurityAlerts: async () => {

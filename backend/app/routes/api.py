@@ -24,7 +24,9 @@ from app.controllers.api_controller import (
     revoke_shared_link,
     get_shared_history,
     get_security_alerts_endpoint,
-    get_statistics_endpoint
+    get_statistics_endpoint,
+    logout_endpoint,
+    get_users_list
 )
 
 api_bp = Blueprint('api', __name__)
@@ -32,6 +34,10 @@ api_bp = Blueprint('api', __name__)
 # Authentication (Unsecured)
 api_bp.route('/register', methods=['POST'])(register_user)
 api_bp.route('/login', methods=['POST'])(login_user)
+api_bp.route('/logout', methods=['POST'])(token_required(logout_endpoint))
+
+# Admin actions
+api_bp.route('/admin/users', methods=['GET'])(token_required(get_users_list))
 
 # Cryptography endpoints (Secured)
 api_bp.route('/encrypt', methods=['POST'])(token_required(encrypt_endpoint))

@@ -120,7 +120,7 @@ def login_user():
 
     log_event(
         user_id=user.id,
-        action='LOGIN',
+        action='LOGIN_SUCCESS',
         module='Authentication',
         file_name=None,
         ip_address=request.remote_addr,
@@ -242,7 +242,7 @@ def classify_text(current_user):
         # Log classification event
         log_event(
             user_id=current_user.id,
-            action='DLP_CLASSIFY',
+            action='FILE_CLASSIFIED',
             module='DLP Classifier',
             file_name=filename,
             ip_address=request.remote_addr,
@@ -407,18 +407,47 @@ def upload_file_endpoint(current_user):
         
         db.session.commit()
 
-        # Log successful upload & encryption
+        # Log successful upload
         log_event(
             user_id=current_user.id,
-            action='FILE_UPLOAD_ENC',
+            action='FILE_UPLOAD',
             module='Cryptographic Vault',
             file_name=filename,
+            file_id=new_file.id,
+            ip_address=request.remote_addr,
+            user_agent=request.user_agent.string,
+            details={"filename": filename, "checksum": checksum, "file_size": file_size},
+            status='success'
+        )
+
+        # Log successful classification
+        log_event(
+            user_id=current_user.id,
+            action='FILE_CLASSIFIED',
+            module='DLP Classifier',
+            file_name=filename,
+            file_id=new_file.id,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
             details={
                 "filename": filename,
-                "checksum": checksum,
                 "classification": classification_label,
+                "dlp_risk_score": float(risk_score)
+            },
+            status='success'
+        )
+
+        # Log successful encryption
+        log_event(
+            user_id=current_user.id,
+            action='FILE_ENCRYPTED',
+            module='Cryptographic Vault',
+            file_name=filename,
+            file_id=new_file.id,
+            ip_address=request.remote_addr,
+            user_agent=request.user_agent.string,
+            details={
+                "filename": filename,
                 "algorithm": enc_pack["key_type"],
                 "exec_time_ms": enc_pack["duration_ms"]
             },
@@ -612,16 +641,58 @@ def get_activity_logs(current_user):
     search = request.args.get('search', '')
     module = request.args.get('module', 'ALL')
     status = request.args.get('status', 'ALL')
+    action_param = request.args.get('action', 'ALL')
+    user_id_param = request.args.get('user_id', 'ALL')
+    start_date_str = request.args.get('start_date', '')
+    end_date_str = request.args.get('end_date', '')
+    
+    try:
+        page = int(request.args.get('page', 1))
+        per_page = int(request.args.get('per_page', 20))
+    except (ValueError, TypeError):
+        page = 1
+        per_page = 20
 
+    query = ActivityLog.query
+
+    # Enforce role-based access
     if current_user.role == 'admin':
-        query = ActivityLog.query
+        if user_id_param != 'ALL':
+            try:
+                query = query.filter_by(user_id=int(user_id_param))
+            except ValueError:
+                pass
     else:
-        query = ActivityLog.query.filter_by(user_id=current_user.id)
+        query = query.filter_by(user_id=current_user.id)
 
+    # Filter by Module
     if module != 'ALL':
         query = query.filter_by(module=module)
+
+    # Filter by Status
     if status != 'ALL':
         query = query.filter_by(status=status)
+
+    # Filter by Action
+    if action_param != 'ALL':
+        query = query.filter_by(action=action_param)
+
+    # Filter by Date Range
+    if start_date_str:
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            query = query.filter(ActivityLog.timestamp >= start_date)
+        except ValueError:
+            pass
+
+    if end_date_str:
+        try:
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d') + timedelta(days=1)
+            query = query.filter(ActivityLog.timestamp < end_date)
+        except ValueError:
+            pass
+
+    # Search keyword
     if search:
         query = query.filter(
             (ActivityLog.action.like(f"%{search}%")) |
@@ -629,9 +700,13 @@ def get_activity_logs(current_user):
             (ActivityLog.ip_address.like(f"%{search}%"))
         )
 
-    logs = query.order_by(ActivityLog.timestamp.desc()).limit(100).all()
+    # Pagination
+    pagination = query.order_by(ActivityLog.timestamp.desc()).paginate(
+        page=page, per_page=per_page, error_out=False
+    )
+
     logs_list = []
-    for l in logs:
+    for l in pagination.items:
         username = 'System/Unknown'
         if l.user_id:
             usr = User.query.get(l.user_id)
@@ -642,15 +717,24 @@ def get_activity_logs(current_user):
             "id": l.id,
             "time": l.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
             "user": username,
+            "user_id": l.user_id,
             "action": l.action,
             "module": l.module,
             "file_name": l.file_name or 'None',
+            "file_id": l.file_id,
             "ip": l.ip_address,
             "agent": l.user_agent,
             "details": l.details.get('message', str(l.details)) if isinstance(l.details, dict) else str(l.details),
             "status": l.status
         })
-    return jsonify(logs_list), 200
+
+    return jsonify({
+        "logs": logs_list,
+        "total": pagination.total,
+        "pages": pagination.pages,
+        "current_page": pagination.page,
+        "per_page": pagination.per_page
+    }), 200
 
 def get_classification_history(current_user):
     history = ClassificationHistory.query.filter_by(user_id=current_user.id).order_by(ClassificationHistory.created_at.desc()).limit(50).all()
@@ -718,9 +802,23 @@ def keys_current(current_user):
         return jsonify({"error": f"Failed to retrieve current keys: {str(e)}"}), 500
 
 def download_file_encrypted(current_user, file_id):
-    file = File.query.filter_by(id=file_id, owner_id=current_user.id).first()
+    file = File.query.get(file_id)
     if not file:
-        return jsonify({"error": "File not found or access denied"}), 404
+        return jsonify({"error": "File not found"}), 404
+
+    if file.owner_id != current_user.id:
+        log_event(
+            user_id=current_user.id,
+            action='UNAUTHORIZED_ACCESS',
+            module='Cryptographic Vault',
+            file_name=file.filename,
+            file_id=file.id,
+            ip_address=request.remote_addr,
+            user_agent=request.user_agent.string,
+            details={"reason": "Owner mismatch on encrypted file download", "file_id": file_id},
+            status='blocked'
+        )
+        return jsonify({"error": "Access denied"}), 403
 
     vault_dir = os.path.join(current_app.instance_path, 'vault')
     file_path = os.path.join(vault_dir, f"{file.checksum}.enc")
@@ -733,6 +831,7 @@ def download_file_encrypted(current_user, file_id):
         action='FILE_DOWNLOAD_ENC',
         module='Cryptographic Vault',
         file_name=file.filename,
+        file_id=file.id,
         ip_address=request.remote_addr,
         user_agent=request.user_agent.string,
         details={"filename": file.filename, "checksum": file.checksum},
@@ -747,9 +846,23 @@ def download_file_encrypted(current_user, file_id):
     )
 
 def download_file_decrypted(current_user, file_id):
-    file = File.query.filter_by(id=file_id, owner_id=current_user.id).first()
+    file = File.query.get(file_id)
     if not file:
-        return jsonify({"error": "File not found or access denied"}), 404
+        return jsonify({"error": "File not found"}), 404
+
+    if file.owner_id != current_user.id:
+        log_event(
+            user_id=current_user.id,
+            action='UNAUTHORIZED_ACCESS',
+            module='Cryptographic Vault',
+            file_name=file.filename,
+            file_id=file.id,
+            ip_address=request.remote_addr,
+            user_agent=request.user_agent.string,
+            details={"reason": "Owner mismatch on decrypted file download", "file_id": file_id},
+            status='blocked'
+        )
+        return jsonify({"error": "Access denied"}), 403
 
     # Extract private key (JSON payload or Form data)
     private_key_pem = None
@@ -798,9 +911,10 @@ def download_file_decrypted(current_user, file_id):
 
         log_event(
             user_id=current_user.id,
-            action='FILE_DOWNLOAD_DEC',
+            action='FILE_DECRYPTED',
             module='Cryptographic Vault',
             file_name=file.filename,
+            file_id=file.id,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
             details={"filename": file.filename, "checksum": file.checksum, "classification": classification},
@@ -817,9 +931,10 @@ def download_file_decrypted(current_user, file_id):
     except Exception as e:
         log_event(
             user_id=current_user.id,
-            action='FILE_DECRYPT_FAIL',
+            action='FILE_DECRYPTED',
             module='Cryptographic Vault',
             file_name=file.filename,
+            file_id=file.id,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
             details={"filename": file.filename, "error": str(e)},
@@ -882,9 +997,23 @@ def verify_file_endpoint(current_user):
     if not file_id:
         return jsonify({"error": "Missing file_id"}), 400
 
-    file = File.query.filter_by(id=file_id, owner_id=current_user.id).first()
+    file = File.query.get(file_id)
     if not file:
-        return jsonify({"error": "File not found or access denied"}), 404
+        return jsonify({"error": "File not found"}), 404
+
+    if file.owner_id != current_user.id:
+        log_event(
+            user_id=current_user.id,
+            action='UNAUTHORIZED_ACCESS',
+            module='File Integrity',
+            file_name=file.filename,
+            file_id=file.id,
+            ip_address=request.remote_addr,
+            user_agent=request.user_agent.string,
+            details={"reason": "Owner mismatch on file verification", "file_id": file_id},
+            status='blocked'
+        )
+        return jsonify({"error": "Access denied"}), 403
 
     integrity = FileIntegrity.query.filter_by(file_id=file.id).first()
     if not integrity:
@@ -914,7 +1043,10 @@ def verify_file_endpoint(current_user):
 
             log_event(
                 user_id=current_user.id,
-                action='INTEGRITY_CHECK',
+                action='FILE_TAMPERED',
+                module='File Integrity',
+                file_name=file.filename,
+                file_id=file.id,
                 ip_address=request.remote_addr,
                 user_agent=request.user_agent.string,
                 details={"filename": file.filename, "status": "TAMPERED", "error": "Encrypted file payload missing"},
@@ -944,7 +1076,10 @@ def verify_file_endpoint(current_user):
 
         log_event(
             user_id=current_user.id,
-            action='INTEGRITY_CHECK',
+            action='FILE_TAMPERED',
+            module='File Integrity',
+            file_name=file.filename,
+            file_id=file.id,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
             details={"filename": file.filename, "status": "TAMPERED", "stored_hash": integrity.sha256_hash, "computed_hash": "None"},
@@ -982,7 +1117,10 @@ def verify_file_endpoint(current_user):
 
         log_event(
             user_id=current_user.id,
-            action='INTEGRITY_CHECK',
+            action='FILE_VERIFIED' if is_intact else 'FILE_TAMPERED',
+            module='File Integrity',
+            file_name=file.filename,
+            file_id=file.id,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
             details={"filename": file.filename, "status": status, "stored_hash": stored_hash, "computed_hash": computed_hash},
@@ -1009,9 +1147,23 @@ def share_file_endpoint(current_user):
     if not file_id:
         return jsonify({"error": "Missing file_id"}), 400
 
-    file = File.query.filter_by(id=file_id, owner_id=current_user.id).first()
+    file = File.query.get(file_id)
     if not file:
-        return jsonify({"error": "File not found or access denied"}), 404
+        return jsonify({"error": "File not found"}), 404
+
+    if file.owner_id != current_user.id:
+        log_event(
+            user_id=current_user.id,
+            action='UNAUTHORIZED_ACCESS',
+            module='Delegated Sharing',
+            file_name=file.filename,
+            file_id=file.id,
+            ip_address=request.remote_addr,
+            user_agent=request.user_agent.string,
+            details={"reason": "Owner mismatch on file sharing", "file_id": file_id},
+            status='blocked'
+        )
+        return jsonify({"error": "Access denied"}), 403
 
     # Validate max_downloads if present
     if max_downloads is not None:
@@ -1054,7 +1206,10 @@ def share_file_endpoint(current_user):
 
         log_event(
             user_id=current_user.id,
-            action='SHARE_CREATED',
+            action='FILE_SHARED',
+            module='Delegated Sharing',
+            file_name=file.filename,
+            file_id=file.id,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
             details={
@@ -1086,6 +1241,7 @@ def resolve_shared_link(token):
         log_event(
             user_id=None,
             action='SHARE_FAILED_ACCESS',
+            module='Delegated Sharing',
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
             details={"token": token, "reason": "Sharing link is invalid or not found"},
@@ -1099,6 +1255,9 @@ def resolve_shared_link(token):
         log_event(
             user_id=share.owner_id,
             action='SHARE_FAILED_ACCESS',
+            module='Delegated Sharing',
+            file_id=share.file_id,
+            file_name=share.file.filename if share.file else None,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
             details={"token": token, "reason": "Download limit has been exceeded"},
@@ -1111,6 +1270,9 @@ def resolve_shared_link(token):
         log_event(
             user_id=share.owner_id,
             action='SHARE_FAILED_ACCESS',
+            module='Delegated Sharing',
+            file_id=share.file_id,
+            file_name=share.file.filename if share.file else None,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
             details={"token": token, "reason": f"This sharing link has been {share.status}"},
@@ -1124,6 +1286,9 @@ def resolve_shared_link(token):
         log_event(
             user_id=share.owner_id,
             action='SHARE_FAILED_ACCESS',
+            module='Delegated Sharing',
+            file_id=share.file_id,
+            file_name=share.file.filename if share.file else None,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
             details={"token": token, "reason": "This sharing link has expired"},
@@ -1136,6 +1301,8 @@ def resolve_shared_link(token):
         log_event(
             user_id=share.owner_id,
             action='SHARE_FAILED_ACCESS',
+            module='Delegated Sharing',
+            file_id=share.file_id,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
             details={"token": token, "reason": "Shared file metadata no longer exists"},
@@ -1151,6 +1318,9 @@ def resolve_shared_link(token):
         log_event(
             user_id=share.owner_id,
             action='SHARE_FAILED_ACCESS',
+            module='Delegated Sharing',
+            file_id=file.id,
+            file_name=file.filename,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
             details={"token": token, "reason": "Encrypted file payload missing from vault storage"},
@@ -1172,6 +1342,9 @@ def resolve_shared_link(token):
         log_event(
             user_id=share.owner_id,
             action='SHARE_ACCESSED',
+            module='Delegated Sharing',
+            file_id=file.id,
+            file_name=file.filename,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
             details={"token": token, "filename": file.filename},
@@ -1202,6 +1375,7 @@ def download_shared_file(token):
         log_event(
             user_id=None,
             action='SHARE_FAILED_ACCESS',
+            module='Delegated Sharing',
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
             details={"token": token, "reason": "Sharing link is invalid or not found"},
@@ -1215,6 +1389,9 @@ def download_shared_file(token):
         log_event(
             user_id=share.owner_id,
             action='SHARE_FAILED_ACCESS',
+            module='Delegated Sharing',
+            file_id=share.file_id,
+            file_name=share.file.filename if share.file else None,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
             details={"token": token, "reason": "Download limit has been exceeded"},
@@ -1226,6 +1403,9 @@ def download_shared_file(token):
         log_event(
             user_id=share.owner_id,
             action='SHARE_FAILED_ACCESS',
+            module='Delegated Sharing',
+            file_id=share.file_id,
+            file_name=share.file.filename if share.file else None,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
             details={"token": token, "reason": f"This sharing link has been {share.status}"},
@@ -1239,6 +1419,9 @@ def download_shared_file(token):
         log_event(
             user_id=share.owner_id,
             action='SHARE_FAILED_ACCESS',
+            module='Delegated Sharing',
+            file_id=share.file_id,
+            file_name=share.file.filename if share.file else None,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
             details={"token": token, "reason": "This sharing link has expired"},
@@ -1251,6 +1434,8 @@ def download_shared_file(token):
         log_event(
             user_id=share.owner_id,
             action='SHARE_FAILED_ACCESS',
+            module='Delegated Sharing',
+            file_id=share.file_id,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
             details={"token": token, "reason": "Shared file metadata no longer exists"},
@@ -1277,6 +1462,9 @@ def download_shared_file(token):
             log_event(
                 user_id=share.owner_id,
                 action='SHARE_FAILED_ACCESS',
+                module='Delegated Sharing',
+                file_id=file.id,
+                file_name=file.filename,
                 ip_address=request.remote_addr,
                 user_agent=request.user_agent.string,
                 details={"token": token, "reason": "Private decryption key is required to decrypt this Secret file"},
@@ -1291,6 +1479,9 @@ def download_shared_file(token):
         log_event(
             user_id=share.owner_id,
             action='SHARE_FAILED_ACCESS',
+            module='Delegated Sharing',
+            file_id=file.id,
+            file_name=file.filename,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
             details={"token": token, "reason": "Encrypted file payload missing from vault"},
@@ -1310,6 +1501,9 @@ def download_shared_file(token):
                 log_event(
                     user_id=file.owner_id,
                     action='SHARE_FAILED_ACCESS',
+                    module='Delegated Sharing',
+                    file_id=file.id,
+                    file_name=file.filename,
                     ip_address=request.remote_addr,
                     user_agent=request.user_agent.string,
                     details={"filename": file.filename, "token": token, "reason": "Security Block: File integrity check failed. Document has been tampered with!"},
@@ -1335,6 +1529,9 @@ def download_shared_file(token):
             log_event(
                 user_id=share.owner_id,
                 action='SHARE_EXPIRED',
+                module='Delegated Sharing',
+                file_id=file.id,
+                file_name=file.filename,
                 ip_address=request.remote_addr,
                 user_agent=request.user_agent.string,
                 details={"filename": file.filename, "token": token, "reason": "Download limit reached"},
@@ -1344,7 +1541,10 @@ def download_shared_file(token):
 
         log_event(
             user_id=file.owner_id,
-            action='SHARE_DOWNLOAD_COMPLETED',
+            action='SHARE_ACCESSED',
+            module='Delegated Sharing',
+            file_id=file.id,
+            file_name=file.filename,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
             details={"filename": file.filename, "token": token, "downloads_count": share.downloads_count},
@@ -1361,6 +1561,9 @@ def download_shared_file(token):
         log_event(
             user_id=share.owner_id,
             action='SHARE_FAILED_ACCESS',
+            module='Delegated Sharing',
+            file_id=share.file_id,
+            file_name=share.file.filename if share.file else None,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
             details={"token": token, "reason": f"Decryption failed: {str(e)}"},
@@ -1380,6 +1583,9 @@ def revoke_shared_link(current_user, share_id):
         log_event(
             user_id=current_user.id,
             action='SHARE_REVOKED',
+            module='Delegated Sharing',
+            file_id=share.file_id,
+            file_name=share.file.filename if share.file else None,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
             details={"share_id": share_id, "file_id": share.file_id},
@@ -1581,17 +1787,60 @@ def get_statistics_endpoint(current_user):
 # Helpers
 # ==========================================
 
-def log_event(user_id, action, module='General', file_name=None, ip_address='0.0.0.0', user_agent=None, details=None, status='success'):
+def log_event(user_id, action, module='General', file_name=None, file_id=None, ip_address='0.0.0.0', user_agent=None, details=None, status='success'):
+    # Security requirement: Sanitise sensitive properties from details
+    sanitized_details = None
+    if details:
+        if isinstance(details, dict):
+            sanitized_details = details.copy()
+            sensitive_keys = ['password', 'private_key', 'token', 'aes_key', 'key', 'password_hash', 'secret']
+            for k in list(sanitized_details.keys()):
+                if any(sec in k.lower() for sec in sensitive_keys):
+                    sanitized_details[k] = "[REDACTED_FOR_SECURITY]"
+        else:
+            sanitized_details = details
+
     log = ActivityLog(
         user_id=user_id,
         action=action,
         module=module,
         file_name=file_name,
+        file_id=file_id,
         ip_address=ip_address,
         user_agent=user_agent,
-        details=details,
+        details=sanitized_details,
         status=status
     )
     db.session.add(log)
     db.session.commit()
+
+def logout_endpoint(current_user):
+    log_event(
+        user_id=current_user.id,
+        action='LOGOUT',
+        module='Authentication',
+        ip_address=request.remote_addr,
+        user_agent=request.headers.get('User-Agent', 'Unknown'),
+        details={"message": f"Operator session terminated for: {current_user.full_name}"},
+        status='success'
+    )
+    return jsonify({"message": "Logout successful"}), 200
+
+def get_users_list(current_user):
+    if current_user.role != 'admin':
+        # Log unauthorized access try
+        log_event(
+            user_id=current_user.id,
+            action='UNAUTHORIZED_ACCESS',
+            module='Authentication',
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get('User-Agent', 'Unknown'),
+            details={"reason": "Non-admin attempted to retrieve list of users"},
+            status='blocked'
+        )
+        return jsonify({"error": "Unauthorized Access"}), 403
+
+    users = User.query.order_by(User.full_name).all()
+    users_data = [{"id": u.id, "full_name": u.full_name, "email": u.email} for u in users]
+    return jsonify(users_data), 200
 

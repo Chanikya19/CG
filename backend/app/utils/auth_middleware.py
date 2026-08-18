@@ -2,7 +2,7 @@ from functools import wraps
 from flask import request, jsonify, current_app
 import jwt
 from datetime import datetime, timedelta, timezone
-from app.models.models import User
+from app.models.models import User, ActivityLog
 from app.database.connection import db
 
 def encode_auth_token(user_id):
@@ -53,17 +53,61 @@ def token_required(f):
                 token = auth_header.split(" ")[1]
 
         if not token:
+            log = ActivityLog(
+                user_id=None,
+                action='UNAUTHORIZED_ACCESS',
+                module='Authentication',
+                ip_address=request.remote_addr,
+                user_agent=request.headers.get('User-Agent', 'Unknown'),
+                status='blocked',
+                details={"reason": "Session token missing"}
+            )
+            db.session.add(log)
+            db.session.commit()
             return jsonify({"error": "Session token missing. Authorization required."}), 401
 
         user_id = decode_auth_token(token)
         if not user_id:
+            log = ActivityLog(
+                user_id=None,
+                action='UNAUTHORIZED_ACCESS',
+                module='Authentication',
+                ip_address=request.remote_addr,
+                user_agent=request.headers.get('User-Agent', 'Unknown'),
+                status='blocked',
+                details={"reason": "Session token invalid or expired"}
+            )
+            db.session.add(log)
+            db.session.commit()
             return jsonify({"error": "Session token invalid or expired."}), 401
 
         current_user = db.session.get(User, user_id)
         if not current_user:
+            log = ActivityLog(
+                user_id=None,
+                action='UNAUTHORIZED_ACCESS',
+                module='Authentication',
+                ip_address=request.remote_addr,
+                user_agent=request.headers.get('User-Agent', 'Unknown'),
+                status='blocked',
+                details={"reason": f"User profile association failed for ID {user_id}"}
+            )
+            db.session.add(log)
+            db.session.commit()
             return jsonify({"error": "User profile associated with token not found."}), 401
 
         if current_user.status != 'active':
+            log = ActivityLog(
+                user_id=current_user.id,
+                action='UNAUTHORIZED_ACCESS',
+                module='Authentication',
+                ip_address=request.remote_addr,
+                user_agent=request.headers.get('User-Agent', 'Unknown'),
+                status='blocked',
+                details={"reason": "User account suspended"}
+            )
+            db.session.add(log)
+            db.session.commit()
             return jsonify({"error": "User account has been suspended."}), 403
 
         return f(current_user, *args, **kwargs)
