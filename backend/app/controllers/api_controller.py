@@ -5,7 +5,7 @@ import bcrypt
 import re
 from flask import jsonify, request, send_file, current_app
 from app.database.connection import db
-from app.models.models import User, File, EncryptionKey, FileClassification, FileSharing, ActivityLog, ClassificationHistory, FileIntegrity
+from app.models.models import User, File, EncryptionKey, FileClassification, FileSharing, ActivityLog, ClassificationHistory, FileIntegrity, IntegrityHistory
 from app.encryption.aes_engine import generate_aes_key, encrypt_aes_gcm, decrypt_aes_gcm
 from app.encryption.rsa_engine import generate_rsa_keypair, encrypt_key_rsa, decrypt_key_rsa
 from app.encryption.hybrid_engine import encrypt_file_hybrid, decrypt_file_hybrid, encrypt_by_sensitivity, decrypt_by_sensitivity
@@ -577,7 +577,7 @@ def get_dashboard_summary(current_user):
             "share_link": f"http://localhost:5173/shared/{recent_share.share_token}",
             "qr_code": recent_share.qr_code,
             "expiry_time": recent_share.expiry_time.strftime('%Y-%m-%d %H:%M:%S'),
-            "integrity_status": "Verified"
+            "integrity_status": "VERIFIED"
         }
         # Live audit status check
         vault_dir = os.path.join(current_app.instance_path, 'vault')
@@ -587,7 +587,7 @@ def get_dashboard_summary(current_user):
                 ciphertext_bytes = f.read()
             from app.utils.integrity import verify_sha256
             if not verify_sha256(ciphertext_bytes, integrity.sha256_hash):
-                share_details["integrity_status"] = "Tampered"
+                share_details["integrity_status"] = "TAMPERED"
 
     return jsonify({
         "stats": {
@@ -892,20 +892,72 @@ def verify_file_endpoint(current_user):
         vault_dir = os.path.join(current_app.instance_path, 'vault')
         file_path = os.path.join(vault_dir, f"{file.checksum}.enc")
         if os.path.exists(file_path):
-            with open(file_path, 'rb') as f:
-                ciphertext_bytes = f.read()
-            enc_hash = generate_sha256(ciphertext_bytes)
-            integrity = FileIntegrity(file_id=file.id, sha256_hash=enc_hash)
-            db.session.add(integrity)
-            db.session.commit()
+            try:
+                with open(file_path, 'rb') as f:
+                    ciphertext_bytes = f.read()
+                enc_hash = generate_sha256(ciphertext_bytes)
+                integrity = FileIntegrity(file_id=file.id, sha256_hash=enc_hash)
+                db.session.add(integrity)
+                db.session.commit()
+            except Exception as e:
+                return jsonify({"error": f"Failed to auto-compute hash: {str(e)}"}), 500
         else:
-            return jsonify({"error": "Encrypted file payload missing. Verification aborted."}), 404
+            # Stored payload missing, can't verify
+            # Record audit attempt as TAMPERED (since file is missing)
+            history_entry = IntegrityHistory(
+                file_id=file.id,
+                user_id=current_user.id,
+                result='TAMPERED'
+            )
+            db.session.add(history_entry)
+            db.session.commit()
+
+            log_event(
+                user_id=current_user.id,
+                action='INTEGRITY_CHECK',
+                ip_address=request.remote_addr,
+                user_agent=request.user_agent.string,
+                details={"filename": file.filename, "status": "TAMPERED", "error": "Encrypted file payload missing"},
+                status='failed'
+            )
+            return jsonify({
+                "file_id": file.id,
+                "filename": file.filename,
+                "status": "TAMPERED",
+                "stored_hash": "None",
+                "computed_hash": "None",
+                "verified_at": datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+            }), 200
 
     vault_dir = os.path.join(current_app.instance_path, 'vault')
     file_path = os.path.join(vault_dir, f"{file.checksum}.enc")
 
     if not os.path.exists(file_path):
-        return jsonify({"error": "Encrypted file payload not found in vault storage"}), 404
+        # File payload missing -> Tampered
+        history_entry = IntegrityHistory(
+            file_id=file.id,
+            user_id=current_user.id,
+            result='TAMPERED'
+        )
+        db.session.add(history_entry)
+        db.session.commit()
+
+        log_event(
+            user_id=current_user.id,
+            action='INTEGRITY_CHECK',
+            ip_address=request.remote_addr,
+            user_agent=request.user_agent.string,
+            details={"filename": file.filename, "status": "TAMPERED", "stored_hash": integrity.sha256_hash, "computed_hash": "None"},
+            status='failed'
+        )
+        return jsonify({
+            "file_id": file.id,
+            "filename": file.filename,
+            "status": "TAMPERED",
+            "stored_hash": integrity.sha256_hash,
+            "computed_hash": "None",
+            "verified_at": datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+        }), 200
 
     try:
         with open(file_path, 'rb') as f:
@@ -917,7 +969,16 @@ def verify_file_endpoint(current_user):
         # Constant-time comparison
         from app.utils.integrity import verify_sha256
         is_intact = verify_sha256(ciphertext_bytes, stored_hash)
-        status = "Verified" if is_intact else "Tampered"
+        status = "VERIFIED" if is_intact else "TAMPERED"
+
+        # Store verification attempt in IntegrityHistory
+        history_entry = IntegrityHistory(
+            file_id=file.id,
+            user_id=current_user.id,
+            result=status
+        )
+        db.session.add(history_entry)
+        db.session.commit()
 
         log_event(
             user_id=current_user.id,
@@ -1032,7 +1093,7 @@ def resolve_shared_link(token):
         
         from app.utils.integrity import verify_sha256
         is_intact = verify_sha256(ciphertext_bytes, stored_hash) if stored_hash else True
-        integrity_status = "Verified" if is_intact else "Tampered"
+        integrity_status = "VERIFIED" if is_intact else "TAMPERED"
 
         return jsonify({
             "file": {

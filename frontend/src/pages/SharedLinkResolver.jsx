@@ -114,7 +114,7 @@ export default function SharedLinkResolver() {
             </div>
 
             {/* Integrity Status Alarm */}
-            {shareData.file.integrity_status === "Tampered" ? (
+            {shareData.file.integrity_status?.toUpperCase() === "TAMPERED" ? (
               <div className="p-4 bg-rose-600/10 border border-rose-500/30 rounded-2xl space-y-2 text-rose-300">
                 <h4 className="text-xs font-bold flex items-center gap-1.5 uppercase tracking-wider">
                   <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0" /> Integrity Audit Violation Detected
@@ -144,7 +144,7 @@ export default function SharedLinkResolver() {
             </div>
 
             {/* Download Logic */}
-            {shareData.file.integrity_status !== "Tampered" && (
+            {shareData.file.integrity_status?.toUpperCase() !== "TAMPERED" && (
               <form onSubmit={handleDownload} className="space-y-4">
                 {shareData.file.classification === 'Secret' && (
                   <div className="space-y-2">

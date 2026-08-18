@@ -85,7 +85,7 @@ export default function FileVerification() {
         }
         return f;
       }));
-      if (res.status === 'Verified') {
+      if (res.status?.toUpperCase() === 'VERIFIED') {
         showNotification('success', `Integrity check PASSED for file ${res.filename}.`);
       } else {
         showNotification('tampered', `WARNING: Tampering detected for file ${res.filename}!`);
@@ -171,7 +171,7 @@ export default function FileVerification() {
           <div>
             <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider">Integrity Verified</span>
             <span className="text-xl font-bold text-white">
-              {files.filter(f => f.verifiedStatus === 'Verified').length} Files
+              {files.filter(f => f.verifiedStatus?.toUpperCase() === 'VERIFIED').length} Files
             </span>
           </div>
         </GlassCard>
@@ -183,7 +183,7 @@ export default function FileVerification() {
           <div>
             <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider">Tampered Detections</span>
             <span className="text-xl font-bold text-rose-400">
-              {files.filter(f => f.verifiedStatus === 'Tampered').length} Alarms
+              {files.filter(f => f.verifiedStatus?.toUpperCase() === 'TAMPERED').length} Alarms
             </span>
           </div>
         </GlassCard>
@@ -268,20 +268,26 @@ export default function FileVerification() {
                       </div>
                     </td>
                     <td className="py-4">
-                      <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 ${
-                        file.verifiedStatus === 'Verified' 
-                          ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20' 
-                          : file.verifiedStatus === 'Tampered'
-                          ? 'bg-rose-500/15 text-rose-400 border border-rose-500/25 animate-pulse'
-                          : file.verifiedStatus === 'Checking'
-                          ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
-                          : 'bg-white/5 text-gray-400 border border-gray-800'
-                      }`}>
-                        {file.verifiedStatus === 'Verified' && <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />}
-                        {file.verifiedStatus === 'Tampered' && <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />}
-                        {file.verifiedStatus === 'Checking' && <RefreshCw className="w-3 h-3 animate-spin text-purple-400" />}
-                        {file.verifiedStatus}
-                      </span>
+                      {file.verifiedStatus?.toUpperCase() === 'VERIFIED' ? (
+                        <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">
+                          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                          ✓ Integrity Verified
+                        </span>
+                      ) : file.verifiedStatus?.toUpperCase() === 'TAMPERED' ? (
+                        <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 bg-rose-500/15 text-rose-400 border border-rose-500/25 animate-pulse">
+                          <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />
+                          ⚠ File Tampered
+                        </span>
+                      ) : file.verifiedStatus === 'Checking' ? (
+                        <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                          <RefreshCw className="w-3 h-3 animate-spin text-purple-400" />
+                          Checking
+                        </span>
+                      ) : (
+                        <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 bg-white/5 text-gray-400 border border-gray-800">
+                          {file.verifiedStatus}
+                        </span>
+                      )}
                     </td>
                     <td className="py-4 text-right">
                       <div className="flex justify-end gap-2">

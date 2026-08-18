@@ -612,14 +612,15 @@ export default function Dashboard() {
 
               <div className="space-y-1 bg-white/5 border border-gray-800 p-3 rounded-2xl">
                 <span className="block text-[10px] text-gray-500 uppercase font-bold tracking-wider">Integrity Status</span>
-                <span className={`px-2 py-0.5 rounded-lg text-[9px] font-bold inline-flex items-center gap-1 ${
-                  dashboardData.recent_share.integrity_status === 'Verified' 
-                    ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
-                    : 'bg-rose-500/10 text-rose-400 border border-rose-500/20 animate-pulse'
-                }`}>
-                  {dashboardData.recent_share.integrity_status === 'Verified' ? <ShieldCheck className="w-3 h-3 text-emerald-400" /> : <ShieldAlert className="w-3 h-3 text-rose-400" />}
-                  {dashboardData.recent_share.integrity_status}
-                </span>
+                {dashboardData.recent_share.integrity_status?.toUpperCase() === 'VERIFIED' || dashboardData.recent_share.integrity_status?.toUpperCase() === 'VERIFIED INTACT' ? (
+                  <span className="px-2 py-0.5 rounded-lg text-[9px] font-bold inline-flex items-center gap-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                    ✓ Integrity Verified
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded-lg text-[9px] font-bold inline-flex items-center gap-1 bg-rose-500/10 text-rose-400 border border-rose-500/20 animate-pulse">
+                    ⚠ File Tampered
+                  </span>
+                )}
               </div>
             </div>
 

@@ -121,3 +121,18 @@ class ClassificationHistory(db.Model):
     confidence = db.Column(db.Float, nullable=False)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
+
+class IntegrityHistory(db.Model):
+    __tablename__ = 'IntegrityHistory'
+    
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    file_id = db.Column(db.Integer, db.ForeignKey('Files.id', ondelete='CASCADE'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('Users.id', ondelete='CASCADE'), nullable=False)
+    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    result = db.Column(db.Enum('VERIFIED', 'TAMPERED'), nullable=False)
+
+    # Relationships
+    file = db.relationship('File', backref=db.backref('integrity_history', cascade='all, delete-orphan'))
+    user = db.relationship('User', backref=db.backref('integrity_history', cascade='all, delete-orphan'))
+
+
