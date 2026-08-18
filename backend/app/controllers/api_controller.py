@@ -5,7 +5,7 @@ import bcrypt
 import re
 from flask import jsonify, request, send_file, current_app
 from app.database.connection import db
-from app.models.models import User, File, EncryptionKey, FileClassification, FileSharing, ActivityLog, ClassificationHistory, FileIntegrity, IntegrityHistory
+from app.models.models import User, File, EncryptionKey, FileClassification, FileSharing, ActivityLog, ClassificationHistory, FileIntegrity, IntegrityHistory, SecurityAlert
 from app.encryption.aes_engine import generate_aes_key, encrypt_aes_gcm, decrypt_aes_gcm
 from app.encryption.rsa_engine import generate_rsa_keypair, encrypt_key_rsa, decrypt_key_rsa
 from app.encryption.hybrid_engine import encrypt_file_hybrid, decrypt_file_hybrid, encrypt_by_sensitivity, decrypt_by_sensitivity
@@ -99,9 +99,27 @@ def login_user():
 
     user = User.query.filter_by(email=email).first()
 
+    if user:
+        if user.lockout_until and user.lockout_until > datetime.utcnow():
+            return jsonify({"error": f"Account locked. Try again after {user.lockout_until.strftime('%Y-%m-%d %H:%M:%S')} UTC"}), 403
+
     if not user or not bcrypt.checkpw(password.encode('utf-8'), user.password_hash.encode('utf-8')):
+        user_id = None
+        if user:
+            user_id = user.id
+            user.failed_login_attempts += 1
+            if user.failed_login_attempts >= 3:
+                user.lockout_until = datetime.utcnow() + timedelta(minutes=15)
+                trigger_security_alert(
+                    user_id=user.id,
+                    alert_type='Multiple failed login attempts',
+                    severity='HIGH',
+                    message=f"Operator account {user.email} locked due to 3 consecutive authentication failures."
+                )
+            db.session.commit()
+
         log_event(
-            user_id=None,
+            user_id=user_id,
             action='LOGIN_FAILED',
             module='Authentication',
             file_name=None,
@@ -114,6 +132,11 @@ def login_user():
 
     if user.status != 'active':
         return jsonify({"error": "Account is suspended"}), 403
+
+    # Reset attempts on success
+    user.failed_login_attempts = 0
+    user.lockout_until = None
+    db.session.commit()
 
     # Generate cryptographically signed JWT token
     token = encode_auth_token(user.id)
@@ -807,6 +830,13 @@ def download_file_encrypted(current_user, file_id):
         return jsonify({"error": "File not found"}), 404
 
     if file.owner_id != current_user.id:
+        trigger_security_alert(
+            user_id=current_user.id,
+            alert_type='Unauthorized API access',
+            severity='HIGH',
+            message=f"Operator attempted unauthorized download of encrypted file {file.filename} (ID {file.id})",
+            file_id=file.id
+        )
         log_event(
             user_id=current_user.id,
             action='UNAUTHORIZED_ACCESS',
@@ -851,6 +881,13 @@ def download_file_decrypted(current_user, file_id):
         return jsonify({"error": "File not found"}), 404
 
     if file.owner_id != current_user.id:
+        trigger_security_alert(
+            user_id=current_user.id,
+            alert_type='Unauthorized API access',
+            severity='HIGH',
+            message=f"Operator attempted unauthorized decrypted download of file {file.filename} (ID {file.id})",
+            file_id=file.id
+        )
         log_event(
             user_id=current_user.id,
             action='UNAUTHORIZED_ACCESS',
@@ -921,6 +958,19 @@ def download_file_decrypted(current_user, file_id):
             status='success'
         )
 
+        # Check suspicious download activity (5+ in 5 minutes)
+        recent_downloads = ActivityLog.query.filter_by(user_id=current_user.id, status='success').filter(
+            ActivityLog.action.in_(['FILE_DECRYPTED', 'FILE_DOWNLOAD_ENC', 'SHARE_ACCESSED'])
+        ).filter(ActivityLog.timestamp >= datetime.utcnow() - timedelta(minutes=5)).count()
+        if recent_downloads >= 5:
+            trigger_security_alert(
+                user_id=current_user.id,
+                alert_type='Suspicious download activity',
+                severity='HIGH',
+                message=f"Operator {current_user.email} performed {recent_downloads} successful document downloads within 5 minutes.",
+                file_id=file.id
+            )
+
         # Stream decrypted binary file
         from flask import make_response
         response = make_response(decrypted_bytes)
@@ -940,6 +990,22 @@ def download_file_decrypted(current_user, file_id):
             details={"filename": file.filename, "error": str(e)},
             status='failed'
         )
+
+        # Check repeated decryption failures (3+ in 15 minutes)
+        recent_failures = ActivityLog.query.filter_by(
+            user_id=current_user.id,
+            action='FILE_DECRYPTED',
+            status='failed'
+        ).filter(ActivityLog.timestamp >= datetime.utcnow() - timedelta(minutes=15)).count()
+        if recent_failures >= 3:
+            trigger_security_alert(
+                user_id=current_user.id,
+                alert_type='Repeated decryption failures',
+                severity='HIGH',
+                message=f"Operator {current_user.email} generated {recent_failures} consecutive decryption failures within 15 minutes.",
+                file_id=file.id
+            )
+
         return jsonify({"error": "Decryption failed. Invalid keys, corrupted payload, or authentication failure."}), 400
 
 # ==========================================
@@ -1002,6 +1068,13 @@ def verify_file_endpoint(current_user):
         return jsonify({"error": "File not found"}), 404
 
     if file.owner_id != current_user.id:
+        trigger_security_alert(
+            user_id=current_user.id,
+            alert_type='Unauthorized API access',
+            severity='MEDIUM',
+            message=f"Operator attempted unauthorized integrity verification of file {file.filename} (ID {file.id})",
+            file_id=file.id
+        )
         log_event(
             user_id=current_user.id,
             action='UNAUTHORIZED_ACCESS',
@@ -1041,6 +1114,14 @@ def verify_file_endpoint(current_user):
             db.session.add(history_entry)
             db.session.commit()
 
+            trigger_security_alert(
+                user_id=current_user.id,
+                alert_type='File tampering detected',
+                severity='CRITICAL',
+                message=f"Integrity check failed: Encrypted vault payload missing for file {file.filename} (ID {file.id})",
+                file_id=file.id
+            )
+
             log_event(
                 user_id=current_user.id,
                 action='FILE_TAMPERED',
@@ -1073,6 +1154,14 @@ def verify_file_endpoint(current_user):
         )
         db.session.add(history_entry)
         db.session.commit()
+
+        trigger_security_alert(
+            user_id=current_user.id,
+            alert_type='File tampering detected',
+            severity='CRITICAL',
+            message=f"Integrity check failed: Encrypted vault payload missing for file {file.filename} (ID {file.id})",
+            file_id=file.id
+        )
 
         log_event(
             user_id=current_user.id,
@@ -1115,6 +1204,15 @@ def verify_file_endpoint(current_user):
         db.session.add(history_entry)
         db.session.commit()
 
+        if not is_intact:
+            trigger_security_alert(
+                user_id=current_user.id,
+                alert_type='File tampering detected',
+                severity='CRITICAL',
+                message=f"Integrity check failed: Signature mismatch detected for file {file.filename} (ID {file.id})",
+                file_id=file.id
+            )
+
         log_event(
             user_id=current_user.id,
             action='FILE_VERIFIED' if is_intact else 'FILE_TAMPERED',
@@ -1152,6 +1250,13 @@ def share_file_endpoint(current_user):
         return jsonify({"error": "File not found"}), 404
 
     if file.owner_id != current_user.id:
+        trigger_security_alert(
+            user_id=current_user.id,
+            alert_type='Unauthorized API access',
+            severity='MEDIUM',
+            message=f"Operator attempted unauthorized sharing creation of file {file.filename} (ID {file.id})",
+            file_id=file.id
+        )
         log_event(
             user_id=current_user.id,
             action='UNAUTHORIZED_ACCESS',
@@ -1252,6 +1357,13 @@ def resolve_shared_link(token):
     if share.max_downloads is not None and share.downloads_count >= share.max_downloads:
         share.status = 'expired'
         db.session.commit()
+        trigger_security_alert(
+            user_id=share.owner_id,
+            alert_type='Expired share link access',
+            severity='MEDIUM',
+            message=f"Access attempt blocked on share token {token} because download limit ({share.max_downloads}) was exceeded.",
+            file_id=share.file_id
+        )
         log_event(
             user_id=share.owner_id,
             action='SHARE_FAILED_ACCESS',
@@ -1267,6 +1379,14 @@ def resolve_shared_link(token):
 
     # Validate active state and expiry
     if share.status != 'active':
+        alert_type = 'Revoked share link access' if share.status == 'revoked' else 'Expired share link access'
+        trigger_security_alert(
+            user_id=share.owner_id,
+            alert_type=alert_type,
+            severity='MEDIUM',
+            message=f"Access attempt blocked on share token {token} because token status is {share.status}.",
+            file_id=share.file_id
+        )
         log_event(
             user_id=share.owner_id,
             action='SHARE_FAILED_ACCESS',
@@ -1283,6 +1403,13 @@ def resolve_shared_link(token):
     if share.expiry_time < datetime.utcnow():
         share.status = 'expired'
         db.session.commit()
+        trigger_security_alert(
+            user_id=share.owner_id,
+            alert_type='Expired share link access',
+            severity='MEDIUM',
+            message=f"Access attempt blocked on share token {token} because token expired on {share.expiry_time}.",
+            file_id=share.file_id
+        )
         log_event(
             user_id=share.owner_id,
             action='SHARE_FAILED_ACCESS',
@@ -1315,6 +1442,13 @@ def resolve_shared_link(token):
     file_path = os.path.join(vault_dir, f"{file.checksum}.enc")
     
     if not os.path.exists(file_path):
+        trigger_security_alert(
+            user_id=share.owner_id,
+            alert_type='File tampering detected',
+            severity='CRITICAL',
+            message=f"Integrity check failed: Encrypted vault payload missing for shared file {file.filename} (ID {file.id})",
+            file_id=file.id
+        )
         log_event(
             user_id=share.owner_id,
             action='SHARE_FAILED_ACCESS',
@@ -1338,6 +1472,15 @@ def resolve_shared_link(token):
         from app.utils.integrity import verify_sha256
         is_intact = verify_sha256(ciphertext_bytes, stored_hash) if stored_hash else True
         integrity_status = "VERIFIED" if is_intact else "TAMPERED"
+
+        if not is_intact:
+            trigger_security_alert(
+                user_id=share.owner_id,
+                alert_type='File tampering detected',
+                severity='CRITICAL',
+                message=f"Integrity check failed: Signature mismatch detected for shared file {file.filename} (ID {file.id})",
+                file_id=file.id
+            )
 
         log_event(
             user_id=share.owner_id,
@@ -1386,6 +1529,13 @@ def download_shared_file(token):
     if share.max_downloads is not None and share.downloads_count >= share.max_downloads:
         share.status = 'expired'
         db.session.commit()
+        trigger_security_alert(
+            user_id=share.owner_id,
+            alert_type='Expired share link access',
+            severity='MEDIUM',
+            message=f"Access attempt blocked on share token {token} because download limit ({share.max_downloads}) was exceeded.",
+            file_id=share.file_id
+        )
         log_event(
             user_id=share.owner_id,
             action='SHARE_FAILED_ACCESS',
@@ -1400,6 +1550,14 @@ def download_shared_file(token):
         return jsonify({"error": "This sharing link has exceeded its download limit"}), 403
 
     if share.status != 'active':
+        alert_type = 'Revoked share link access' if share.status == 'revoked' else 'Expired share link access'
+        trigger_security_alert(
+            user_id=share.owner_id,
+            alert_type=alert_type,
+            severity='MEDIUM',
+            message=f"Access attempt blocked on share token {token} because token status is {share.status}.",
+            file_id=share.file_id
+        )
         log_event(
             user_id=share.owner_id,
             action='SHARE_FAILED_ACCESS',
@@ -1416,6 +1574,13 @@ def download_shared_file(token):
     if share.expiry_time < datetime.utcnow():
         share.status = 'expired'
         db.session.commit()
+        trigger_security_alert(
+            user_id=share.owner_id,
+            alert_type='Expired share link access',
+            severity='MEDIUM',
+            message=f"Access attempt blocked on share token {token} because token expired on {share.expiry_time}.",
+            file_id=share.file_id
+        )
         log_event(
             user_id=share.owner_id,
             action='SHARE_FAILED_ACCESS',
@@ -1634,83 +1799,36 @@ def get_shared_history(current_user):
 # ==========================================
 
 def get_security_alerts_endpoint(current_user):
-    alerts = []
+    severity = request.args.get('severity', 'ALL')
+    status = request.args.get('status', 'ALL')
     
-    # 1. Tampered files (via logs and integrity state check)
-    tampered_logs = ActivityLog.query.filter(
-        (ActivityLog.action == 'SHARE_TAMPER_BLOCK') | 
-        ((ActivityLog.action == 'INTEGRITY_CHECK') & (ActivityLog.status == 'failed'))
-    ).order_by(ActivityLog.timestamp.desc()).all()
+    if current_user.role == 'admin':
+        query = SecurityAlert.query
+    else:
+        query = SecurityAlert.query.filter_by(user_id=current_user.id)
+        
+    if severity != 'ALL':
+        query = query.filter_by(severity=severity)
+    if status != 'ALL':
+        query = query.filter_by(status=status)
+        
+    alerts = query.order_by(SecurityAlert.created_at.desc()).all()
     
-    for log in tampered_logs:
-        alerts.append({
-            "id": f"ALERT-T-{log.id}",
-            "type": "Tampered Files",
-            "severity": "CRITICAL",
-            "message": f"Integrity check failed: file {log.file_name or 'Unknown'} has been modified on disk.",
-            "timestamp": log.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
-            "ip_address": log.ip_address,
-            "status": "active"
+    alerts_data = []
+    for a in alerts:
+        alerts_data.append({
+            "id": a.id,
+            "user_id": a.user_id,
+            "type": a.alert_type,
+            "severity": a.severity,
+            "message": a.message,
+            "status": 'active' if a.status == 'unresolved' else 'resolved',
+            "timestamp": a.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+            "ip_address": a.ip_address or '0.0.0.0',
+            "created_at": a.created_at.strftime('%Y-%m-%d %H:%M:%S')
         })
         
-    # 2. Failed logins
-    failed_logins = ActivityLog.query.filter_by(action='LOGIN_FAILED').order_by(ActivityLog.timestamp.desc()).all()
-    for log in failed_logins:
-        alerts.append({
-            "id": f"ALERT-L-{log.id}",
-            "type": "Failed Login Attempts",
-            "severity": "HIGH",
-            "message": f"Failed authentication attempt for identity: {log.details.get('email') if (log.details and isinstance(log.details, dict)) else 'Unknown'}",
-            "timestamp": log.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
-            "ip_address": log.ip_address,
-            "status": "active"
-        })
-
-    # 3. Expired links
-    expired_shares = FileSharing.query.filter(
-        (FileSharing.expiry_time < datetime.utcnow()) | (FileSharing.status == 'expired')
-    ).order_by(FileSharing.expiry_time.desc()).all()
-    
-    for s in expired_shares:
-        alerts.append({
-            "id": f"ALERT-S-{s.id}",
-            "type": "Expired Sharing Links",
-            "severity": "MEDIUM",
-            "message": f"Secure sharing link for {s.file.filename if s.file else 'Unknown'} has expired or resolved past deadline.",
-            "timestamp": s.expiry_time.strftime('%Y-%m-%d %H:%M:%S'),
-            "ip_address": "System",
-            "status": "resolved"
-        })
-
-    # 4. Unauthorized Access attempts
-    unauthorized_logs = ActivityLog.query.filter_by(status='blocked').order_by(ActivityLog.timestamp.desc()).all()
-    for log in unauthorized_logs:
-        if log.action != 'SHARE_TAMPER_BLOCK':
-            alerts.append({
-                "id": f"ALERT-U-{log.id}",
-                "type": "Unauthorized Access",
-                "severity": "HIGH",
-                "message": f"Blocked unauthorized resource request: {log.action}",
-                "timestamp": log.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
-                "ip_address": log.ip_address,
-                "status": "active"
-            })
-
-    # 5. Encryption Errors
-    error_logs = ActivityLog.query.filter_by(action='FILE_DECRYPT_FAIL').order_by(ActivityLog.timestamp.desc()).all()
-    for log in error_logs:
-        alerts.append({
-            "id": f"ALERT-E-{log.id}",
-            "type": "Encryption Errors",
-            "severity": "HIGH",
-            "message": f"Cryptographic operation failed for file {log.file_name or 'Unknown'}.",
-            "timestamp": log.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
-            "ip_address": log.ip_address,
-            "status": "active"
-        })
-
-    alerts.sort(key=lambda x: x['timestamp'], reverse=True)
-    return jsonify(alerts), 200
+    return jsonify(alerts_data), 200
 
 def get_statistics_endpoint(current_user):
     # 1. Classification distribution
@@ -1828,6 +1946,12 @@ def logout_endpoint(current_user):
 
 def get_users_list(current_user):
     if current_user.role != 'admin':
+        trigger_security_alert(
+            user_id=current_user.id,
+            alert_type='Unauthorized API access',
+            severity='HIGH',
+            message=f"Non-admin user {current_user.email} attempted to query system-wide operators list"
+        )
         # Log unauthorized access try
         log_event(
             user_id=current_user.id,
@@ -1843,4 +1967,82 @@ def get_users_list(current_user):
     users = User.query.order_by(User.full_name).all()
     users_data = [{"id": u.id, "full_name": u.full_name, "email": u.email} for u in users]
     return jsonify(users_data), 200
+
+def trigger_security_alert(user_id, alert_type, severity, message, file_id=None):
+    ip_addr = '0.0.0.0'
+    u_agent = 'Unknown'
+    try:
+        if request:
+            ip_addr = request.remote_addr or '0.0.0.0'
+            u_agent = request.headers.get('User-Agent', 'Unknown')
+    except RuntimeError:
+        # request context might not be active during tests / off-thread calls
+        pass
+
+    alert = SecurityAlert(
+        user_id=user_id,
+        alert_type=alert_type,
+        severity=severity,
+        message=message,
+        ip_address=ip_addr,
+        status='unresolved'
+    )
+    db.session.add(alert)
+    db.session.commit()
+
+    # Log integration
+    log_event(
+        user_id=user_id,
+        action='SECURITY_ALERT',
+        module='General',
+        file_id=file_id,
+        ip_address=ip_addr,
+        user_agent=u_agent,
+        details={
+            "alert_id": alert.id,
+            "alert_type": alert_type,
+            "severity": severity,
+            "message": message
+        },
+        status='failed'
+    )
+    return alert
+
+def resolve_security_alert_endpoint(current_user, alert_id):
+    if current_user.role != 'admin':
+        log_event(
+            user_id=current_user.id,
+            action='UNAUTHORIZED_ACCESS',
+            module='General',
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get('User-Agent', 'Unknown'),
+            details={"reason": "Attempted to resolve security alert as non-admin", "alert_id": alert_id},
+            status='blocked'
+        )
+        return jsonify({"error": "Access denied"}), 403
+
+    alert = SecurityAlert.query.get(alert_id)
+    if not alert:
+        return jsonify({"error": "Alert not found"}), 404
+
+    alert.status = 'resolved'
+    db.session.commit()
+
+    log_event(
+        user_id=current_user.id,
+        action='ALERT_RESOLVED',
+        module='General',
+        ip_address=request.remote_addr,
+        user_agent=request.headers.get('User-Agent', 'Unknown'),
+        details={"alert_id": alert_id, "alert_type": alert.alert_type},
+        status='success'
+    )
+
+    return jsonify({
+        "message": "Alert marked as resolved successfully",
+        "alert": {
+            "id": alert.id,
+            "status": "resolved"
+        }
+    }), 200
 

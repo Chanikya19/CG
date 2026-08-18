@@ -183,8 +183,12 @@ export const auditAPI = {
     const res = await apiClient.get('/admin/users');
     return res.data;
   },
-  getSecurityAlerts: async () => {
-    const res = await apiClient.get('/security-alerts');
+  getSecurityAlerts: async (severity = 'ALL', status = 'ALL') => {
+    const res = await apiClient.get(`/security-alerts?severity=${severity}&status=${status}`);
+    return res.data;
+  },
+  resolveSecurityAlert: async (alertId) => {
+    const res = await apiClient.post(`/admin/alerts/${alertId}/resolve`);
     return res.data;
   },
   getStatistics: async () => {

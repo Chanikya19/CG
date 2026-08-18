@@ -18,12 +18,16 @@ export default function SecurityReports() {
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filterSeverity, setFilterSeverity] = useState('ALL');
+  const [filterStatus, setFilterStatus] = useState('ALL');
   const [exporting, setExporting] = useState(false);
+
+  const currentUser = JSON.parse(sessionStorage.getItem('cipherguard_user') || localStorage.getItem('cipherguard_user') || '{}');
+  const isAdmin = currentUser.role === 'admin';
 
   const fetchAlerts = async () => {
     try {
       setLoading(true);
-      const data = await auditAPI.getSecurityAlerts();
+      const data = await auditAPI.getSecurityAlerts(filterSeverity, filterStatus);
       setAlerts(data);
     } catch (err) {
       console.error(err);
@@ -34,7 +38,7 @@ export default function SecurityReports() {
 
   useEffect(() => {
     fetchAlerts();
-  }, []);
+  }, [filterSeverity, filterStatus]);
 
   const getSeverityBadgeColor = (severity) => {
     switch (severity) {
@@ -49,14 +53,13 @@ export default function SecurityReports() {
     }
   };
 
-  const filteredAlerts = alerts.filter(a => 
-    filterSeverity === 'ALL' || a.severity === filterSeverity
-  );
+  const filteredAlerts = alerts;
 
-  // Dynamic threat score calculation
-  const criticalCount = alerts.filter(a => a.severity === 'CRITICAL').length;
-  const highCount = alerts.filter(a => a.severity === 'HIGH').length;
-  const mediumCount = alerts.filter(a => a.severity === 'MEDIUM').length;
+  // Dynamic threat score calculation based on unresolved alerts
+  const activeAlerts = alerts.filter(a => a.status === 'active');
+  const criticalCount = activeAlerts.filter(a => a.severity === 'CRITICAL').length;
+  const highCount = activeAlerts.filter(a => a.severity === 'HIGH').length;
+  const mediumCount = activeAlerts.filter(a => a.severity === 'MEDIUM').length;
   const threatScore = Math.min(10, (criticalCount * 3.0) + (highCount * 1.5) + (mediumCount * 0.5));
 
   const handlePrint = () => {
@@ -185,16 +188,28 @@ export default function SecurityReports() {
           </h3>
           
           <div className="flex items-center gap-3">
-            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Severity Filter:</span>
+            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Severity:</span>
             <select
               value={filterSeverity}
               onChange={(e) => setFilterSeverity(e.target.value)}
               className="py-1.5 px-3 rounded-lg bg-white/5 border border-gray-800 text-[11px] text-gray-300 font-semibold cursor-pointer"
             >
-              <option value="ALL">All Alerts</option>
+              <option value="ALL">All Severities</option>
               <option value="CRITICAL">Critical only</option>
               <option value="HIGH">High only</option>
               <option value="MEDIUM">Medium only</option>
+              <option value="LOW">Low only</option>
+            </select>
+
+            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Status:</span>
+            <select
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value)}
+              className="py-1.5 px-3 rounded-lg bg-white/5 border border-gray-800 text-[11px] text-gray-300 font-semibold cursor-pointer"
+            >
+              <option value="ALL">All Statuses</option>
+              <option value="unresolved">Active / Unresolved</option>
+              <option value="resolved">Resolved</option>
             </select>
           </div>
         </div>
@@ -231,7 +246,7 @@ export default function SecurityReports() {
                     <td className="py-4 text-gray-300 leading-normal max-w-xs">{alert.message}</td>
                     <td className="py-4 font-mono text-[9px] text-gray-400">{alert.timestamp}</td>
                     <td className="py-4 font-mono text-[10px] text-gray-500">{alert.ip_address}</td>
-                    <td className="py-4 text-right">
+                    <td className="py-4 text-right flex items-center justify-end gap-2 mt-1">
                       <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
                         alert.status === 'active' 
                           ? 'bg-rose-500/10 border border-rose-500/20 text-rose-400' 
@@ -239,6 +254,23 @@ export default function SecurityReports() {
                       }`}>
                         {alert.status}
                       </span>
+                      {isAdmin && alert.status === 'active' && (
+                        <button
+                          onClick={async () => {
+                            if (window.confirm("Mark this security incident as resolved?")) {
+                              try {
+                                await auditAPI.resolveSecurityAlert(alert.id);
+                                fetchAlerts();
+                              } catch (err) {
+                                alert("Failed to resolve alert: " + (err.response?.data?.error || err.message));
+                              }
+                            }
+                          }}
+                          className="px-2 py-0.5 bg-purple-600/30 hover:bg-purple-600/50 border border-purple-500/40 text-purple-200 rounded-lg text-[9px] font-semibold transition-all"
+                        >
+                          Resolve
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

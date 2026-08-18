@@ -26,7 +26,8 @@ from app.controllers.api_controller import (
     get_security_alerts_endpoint,
     get_statistics_endpoint,
     logout_endpoint,
-    get_users_list
+    get_users_list,
+    resolve_security_alert_endpoint
 )
 
 api_bp = Blueprint('api', __name__)
@@ -38,6 +39,7 @@ api_bp.route('/logout', methods=['POST'])(token_required(logout_endpoint))
 
 # Admin actions
 api_bp.route('/admin/users', methods=['GET'])(token_required(get_users_list))
+api_bp.route('/admin/alerts/<int:alert_id>/resolve', methods=['POST'])(token_required(resolve_security_alert_endpoint))
 
 # Cryptography endpoints (Secured)
 api_bp.route('/encrypt', methods=['POST'])(token_required(encrypt_endpoint))

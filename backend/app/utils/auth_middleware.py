@@ -2,7 +2,7 @@ from functools import wraps
 from flask import request, jsonify, current_app
 import jwt
 from datetime import datetime, timedelta, timezone
-from app.models.models import User, ActivityLog
+from app.models.models import User, ActivityLog, SecurityAlert
 from app.database.connection import db
 
 def encode_auth_token(user_id):
@@ -53,6 +53,15 @@ def token_required(f):
                 token = auth_header.split(" ")[1]
 
         if not token:
+            alert = SecurityAlert(
+                user_id=None,
+                alert_type='Unauthorized API access',
+                severity='LOW',
+                message="API request rejected due to missing Authorization header token.",
+                ip_address=request.remote_addr,
+                status='unresolved'
+            )
+            db.session.add(alert)
             log = ActivityLog(
                 user_id=None,
                 action='UNAUTHORIZED_ACCESS',
@@ -68,6 +77,15 @@ def token_required(f):
 
         user_id = decode_auth_token(token)
         if not user_id:
+            alert = SecurityAlert(
+                user_id=None,
+                alert_type='Unauthorized API access',
+                severity='LOW',
+                message="API request rejected due to invalid or expired JWT token.",
+                ip_address=request.remote_addr,
+                status='unresolved'
+            )
+            db.session.add(alert)
             log = ActivityLog(
                 user_id=None,
                 action='UNAUTHORIZED_ACCESS',
@@ -83,6 +101,15 @@ def token_required(f):
 
         current_user = db.session.get(User, user_id)
         if not current_user:
+            alert = SecurityAlert(
+                user_id=None,
+                alert_type='Unauthorized API access',
+                severity='MEDIUM',
+                message=f"API request rejected: user profile associated with token (ID {user_id}) not found.",
+                ip_address=request.remote_addr,
+                status='unresolved'
+            )
+            db.session.add(alert)
             log = ActivityLog(
                 user_id=None,
                 action='UNAUTHORIZED_ACCESS',
@@ -97,6 +124,15 @@ def token_required(f):
             return jsonify({"error": "User profile associated with token not found."}), 401
 
         if current_user.status != 'active':
+            alert = SecurityAlert(
+                user_id=current_user.id,
+                alert_type='Unauthorized API access',
+                severity='HIGH',
+                message=f"Suspended operator {current_user.email} attempted to access protected API route.",
+                ip_address=request.remote_addr,
+                status='unresolved'
+            )
+            db.session.add(alert)
             log = ActivityLog(
                 user_id=current_user.id,
                 action='UNAUTHORIZED_ACCESS',

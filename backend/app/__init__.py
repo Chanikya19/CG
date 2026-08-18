@@ -60,4 +60,11 @@ def create_app(config_class=Config):
         except Exception:
             db.session.rollback()
 
+        # Gracefully add ip_address to SecurityAlerts if not present
+        try:
+            db.session.execute(db.text("ALTER TABLE SecurityAlerts ADD COLUMN ip_address VARCHAR(45) DEFAULT '0.0.0.0'"))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
     return app

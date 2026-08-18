@@ -769,9 +769,9 @@ export default function Dashboard() {
           <GlassCard className="space-y-4 flex flex-col justify-between h-full" glow="rose">
             <div>
               <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <AlertTriangle className="w-4.5 h-4.5 text-rose-500 animate-pulse" /> Security Incident Feed
+                <AlertTriangle className="w-4.5 h-4.5 text-rose-500 animate-pulse" /> Recent Security Alerts
               </h3>
-              <p className="text-xs text-gray-400 mt-0.5">Real-time alerts tracking auth anomalies and policy violations.</p>
+              <p className="text-xs text-gray-400 mt-0.5">Real-time alerts tracking authentication anomalies and policy violations.</p>
             </div>
 
             <div className="flex-1 overflow-y-auto max-h-[300px] space-y-3 pr-1 border border-gray-850 rounded-xl bg-gray-950/20 p-2.5">

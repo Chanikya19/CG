@@ -139,3 +139,19 @@ class IntegrityHistory(db.Model):
     user = db.relationship('User', backref=db.backref('integrity_history', cascade='all, delete-orphan'))
 
 
+class SecurityAlert(db.Model):
+    __tablename__ = 'SecurityAlerts'
+    
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('Users.id', ondelete='SET NULL'), nullable=True)
+    alert_type = db.Column(db.String(100), nullable=False)
+    severity = db.Column(db.Enum('LOW', 'MEDIUM', 'HIGH', 'CRITICAL'), nullable=False, default='MEDIUM')
+    message = db.Column(db.Text, nullable=False)
+    ip_address = db.Column(db.String(45), nullable=True, default='0.0.0.0')
+    status = db.Column(db.Enum('unresolved', 'resolved'), nullable=False, default='unresolved')
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    # Relationship
+    user_rel = db.relationship('User', backref=db.backref('alerts', cascade='all, delete-orphan'))
+
+
