@@ -207,24 +207,34 @@ def classify_text(current_user):
     if not filename or not file_bytes:
         return jsonify({"error": "Empty file or payload"}), 400
 
+    # Sanitize filename to prevent path traversal or filesystem execution
+    from werkzeug.utils import secure_filename
+    clean_filename = secure_filename(filename)
+    if not clean_filename or clean_filename in ('.', '..'):
+        _, ext = os.path.splitext(filename.lower())
+        if not ext:
+            ext = '.txt'
+        clean_filename = f"safe_document{ext}"
+    filename = clean_filename
+
     try:
         if text is None:
             text = extract_text(filename, file_bytes)
 
-        if not text.strip():
-            return jsonify({"error": "Extracted text is empty or whitespace"}), 400
-
         # Classify document
         report = classify_document(text)
-        category = report['classification']
-        confidence = report['confidence']
+        category = report['category']                  # E.g. "CONFIDENTIAL"
+        confidence = report['confidence']              # E.g. 94.20
+        detected_indicators = report['detected_indicators']
+        explanation = report.get('explanation', '')
 
         # Log prediction to classification history
+        # Normalize to database expected values: category title-cased ('Confidential'), confidence as fraction (0.942)
         history_entry = ClassificationHistory(
             user_id=current_user.id,
             filename=filename,
-            category=category,
-            confidence=confidence
+            category=category.title(),
+            confidence=float(confidence / 100.0)
         )
         db.session.add(history_entry)
         db.session.commit()
@@ -237,14 +247,22 @@ def classify_text(current_user):
             file_name=filename,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
-            details={"filename": filename, "category": category, "confidence": confidence},
+            details={
+                "filename": filename, 
+                "category": category, 
+                "confidence": confidence,
+                "detected_indicators": detected_indicators,
+                "explanation": explanation
+            },
             status='success'
         )
 
         return jsonify({
-            "filename": filename,
             "category": category,
-            "confidence": confidence
+            "confidence": confidence,
+            "detected_indicators": detected_indicators,
+            "explanation": explanation,
+            "filename": filename
         }), 200
     except ValueError as ve:
         return jsonify({"error": str(ve)}), 400
@@ -269,6 +287,16 @@ def upload_file_endpoint(current_user):
     if not filename or not file_bytes:
         return jsonify({"error": "Empty file or payload"}), 400
 
+    # Sanitize filename to prevent path traversal or filesystem execution
+    from werkzeug.utils import secure_filename
+    clean_filename = secure_filename(filename)
+    if not clean_filename or clean_filename in ('.', '..'):
+        _, ext = os.path.splitext(filename.lower())
+        if not ext:
+            ext = '.txt'
+        clean_filename = f"safe_document{ext}"
+    filename = clean_filename
+
     # 1. Hashing SHA-256 for Integrity checks
     checksum = generate_sha256(file_bytes)
 
@@ -276,16 +304,17 @@ def upload_file_endpoint(current_user):
     try:
         text = extract_text(filename, file_bytes)
         dlp_report = classify_document(text)
-        classification_label = dlp_report["classification"]
+        classification_label = dlp_report["category"].title() # Normalize "SECRET" -> "Secret" for DB & backend logic
         risk_score = dlp_report["risk_score"]
     except ValueError as ve:
-        # Catch unsupported extensions or text extraction errors
+        # Catch unsupported extensions, size limits, or text extraction errors
         return jsonify({"error": str(ve)}), 400
     except Exception as e:
         # Fallback if model fails
         classification_label = 'Confidential'
         risk_score = 5.0
         text = ""
+        dlp_report = {"detected_indicators": ["Confidential keywords"]}
 
     # Block files if classification is Secret and DLP risk score is very high (strict check)
     if classification_label == 'Secret' and risk_score > 9.5:
@@ -341,13 +370,18 @@ def upload_file_endpoint(current_user):
         db.session.add(new_file)
         db.session.flush() # Generate ID
 
+        detected = dlp_report.get("detected_indicators", [])
+        has_pii = any(ind in detected for ind in ["Personal information", "Government identifiers", "Financial information", "Account numbers"])
+        has_creds = "Credentials" in detected
+        has_ip = "Confidential keywords" in detected or 'PATENT' in text or 'blueprint' in text
+
         new_classification = FileClassification(
             file_id=new_file.id,
             classification_label=classification_label,
             dlp_risk_score=risk_score,
-            contains_pii='SSN' in text or 'Social Security' in text or (dlp_report['probabilities'].get('Secret', 0.0) > 0.3 if 'dlp_report' in locals() else False),
-            contains_credentials='PASSWORD' in text or 'PRIVATE KEY' in text or 'DATABASE_URL' in text,
-            contains_ip='PATENT' in text or 'blueprint' in text
+            contains_pii=has_pii,
+            contains_credentials=has_creds,
+            contains_ip=has_ip
         )
         db.session.add(new_classification)
 

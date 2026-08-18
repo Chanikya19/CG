@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, jsonify
 from flask_cors import CORS
 from app.config.settings import Config
 from app.database.connection import db
@@ -16,6 +16,11 @@ def create_app(config_class=Config):
 
     # Register API blueprint routes under prefix /api
     app.register_blueprint(api_bp, url_prefix='/api')
+
+    # Register 413 Request Entity Too Large error handler
+    @app.errorhandler(413)
+    def request_entity_too_large(error):
+        return jsonify({"error": "File size exceeds the maximum limit of 10MB"}), 413
 
     # Default root homepage route
     @app.route('/')

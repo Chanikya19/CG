@@ -286,11 +286,10 @@ export default function Dashboard() {
   };
 
   const getLabelColor = (label) => {
-    switch (label) {
-      case 'Secret': return 'bg-purple-500/10 text-purple-400 border-purple-500/25';
-      case 'Confidential': return 'bg-amber-500/10 text-amber-400 border-amber-500/25';
-      default: return 'bg-blue-500/10 text-blue-400 border-blue-500/25';
-    }
+    const norm = label?.toLowerCase() || '';
+    if (norm === 'secret') return 'bg-purple-500/10 text-purple-400 border-purple-500/25';
+    if (norm === 'confidential') return 'bg-amber-500/10 text-amber-400 border-amber-500/25';
+    return 'bg-blue-500/10 text-blue-400 border-blue-500/25';
   };
 
   if (loading) {
@@ -490,13 +489,15 @@ export default function Dashboard() {
 
               <div className="flex items-start gap-4">
                 <div className="space-y-1 flex-1">
-                  <span className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider">ML Prediction Outcome</span>
+                  <span className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Classification Outcome</span>
                   <div className="flex items-center gap-2">
                     <span className={`px-2.5 py-1 rounded-full text-xs font-bold border uppercase tracking-wider ${getLabelColor(classificationResult.category)}`}>
                       {classificationResult.category}
                     </span>
                     <span className="text-xs text-gray-400 font-medium">
-                      Confidence: <span className="text-white font-semibold">{(classificationResult.confidence * 100).toFixed(1)}%</span>
+                      Confidence: <span className="text-white font-semibold">
+                        {((classificationResult.confidence > 1.0 ? classificationResult.confidence : classificationResult.confidence * 100)).toFixed(1)}%
+                      </span>
                     </span>
                   </div>
                   
@@ -504,27 +505,41 @@ export default function Dashboard() {
                   <div className="w-full bg-gray-950 rounded-full h-1.5 border border-gray-800 mt-3 overflow-hidden">
                     <div 
                       className={`h-full rounded-full transition-all duration-700 ${
-                        classificationResult.category === 'Secret' ? 'bg-purple-500' :
-                        classificationResult.category === 'Confidential' ? 'bg-amber-500' : 'bg-blue-500'
+                        classificationResult.category?.toUpperCase() === 'SECRET' ? 'bg-purple-500' :
+                        classificationResult.category?.toUpperCase() === 'CONFIDENTIAL' ? 'bg-amber-500' : 'bg-blue-500'
                       }`}
-                      style={{ width: `${classificationResult.confidence * 100}%` }}
+                      style={{ width: `${classificationResult.confidence > 1.0 ? classificationResult.confidence : classificationResult.confidence * 100}%` }}
                     ></div>
                   </div>
+
+                  {/* Detected rule-based indicators */}
+                  {classificationResult.detected_indicators && classificationResult.detected_indicators.length > 0 && (
+                    <div className="mt-3.5 space-y-1.5 border-t border-gray-800/40 pt-3">
+                      <span className="block text-[9px] font-bold text-gray-500 uppercase tracking-wider">Detected Security Indicators</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {classificationResult.detected_indicators.map((indicator, index) => (
+                          <span key={index} className="px-2 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20 text-[9px] font-semibold uppercase tracking-wider">
+                            {indicator}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
               <div className={`p-3 rounded-xl border text-[11px] leading-relaxed ${
-                classificationResult.category === 'Secret' ? 'bg-purple-500/5 text-purple-300 border-purple-500/10' :
-                classificationResult.category === 'Confidential' ? 'bg-amber-500/5 text-amber-300 border-amber-500/10' :
+                classificationResult.category?.toUpperCase() === 'SECRET' ? 'bg-purple-500/5 text-purple-300 border-purple-500/10' :
+                classificationResult.category?.toUpperCase() === 'CONFIDENTIAL' ? 'bg-amber-500/5 text-amber-300 border-amber-500/10' :
                 'bg-blue-500/5 text-blue-300 border-blue-500/10'
               }`}>
-                {classificationResult.category === 'Secret' && (
+                {classificationResult.category?.toUpperCase() === 'SECRET' && (
                   <span><strong>COMPLIANCE ALERT:</strong> Secret credentials, server environment variables, or private key sequences detected. Encrypt file immediately before vault sharing.</span>
                 )}
-                {classificationResult.category === 'Confidential' && (
+                {classificationResult.category?.toUpperCase() === 'CONFIDENTIAL' && (
                   <span><strong>SECURE NOTE:</strong> RESTRICTED internal department details. Access control and symmetric hybrid encryption recommended.</span>
                 )}
-                {classificationResult.category === 'Public' && (
+                {classificationResult.category?.toUpperCase() === 'PUBLIC' && (
                   <span><strong>AUDIT COMPLIANT:</strong> General public brochure or metadata schema detected. Safe for open distribution.</span>
                 )}
               </div>
@@ -561,7 +576,7 @@ export default function Dashboard() {
                           {item.category}
                         </span>
                       </td>
-                      <td className="p-3 font-mono">{(item.confidence * 100).toFixed(1)}%</td>
+                      <td className="p-3 font-mono">{((item.confidence > 1.0 ? item.confidence : item.confidence * 100)).toFixed(1)}%</td>
                       <td className="p-3 text-[10px] text-gray-500 font-mono">{item.date ? (item.date.split(' ')[1] || item.date) : 'N/A'}</td>
                     </tr>
                   ))}

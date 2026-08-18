@@ -16,6 +16,9 @@ class Config:
     
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     
+    # Upload size limit (10 MB)
+    MAX_CONTENT_LENGTH = 10 * 1024 * 1024
+    
     # AI Classification Model settings
     MODEL_PATH = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 

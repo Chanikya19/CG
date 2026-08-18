@@ -20,3 +20,21 @@ text,label
 "This document is a highly sensitive corporate patent application. Trade secret regarding hybrid encryption matrices.",Secret
 "Confidential client account records. Primary target: routing number 121000248, account 998273291.",Secret
 "Master admin encryption key and hash salt configs. Salt: bcrypt$2b$12$e53j. Passphrase: decrypt.",Secret
+"Check our open source code repository on GitHub. All contributions are welcome and licensed under MIT.",Public
+"The product catalog lists all available packages and pricing details for retail customers.",Public
+"Frequently Asked Questions about our service: learn about registration, billing, and login.",Public
+"We have published our official privacy policy and terms of service. They apply to all public users.",Public
+"Our community forum is a place where you can ask questions, find tutorials, and share tips.",Public
+"We are holding a webinar next Tuesday covering basic security practices. Register publicly now.",Public
+"The department budget spreadsheet details salaries, software subscriptions, and hardware upgrades.",Confidential
+"Feedback from client interviews suggests that the new user interface is much faster and simpler.",Confidential
+"This internal memo outlines the restructuring plans for the marketing team in Q4.",Confidential
+"Our proprietary coding framework has a strict policy of code review before pushing to production.",Confidential
+"Minutes from the managers meeting: discussions on remote work policies, annual bonuses, and goals.",Confidential
+"Draft copy of our corporate bylaws and internal standard operating procedures. Restricted access.",Confidential
+"The database password for production server is: admin_db_prod_2026_encrypt. Port 5432.",Secret
+"Here are the secret API tokens for Stripe, SendGrid, and Slack integration. Do not commit to git.",Secret
+"The private key to sign user sessions: -----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASC\n-----END PRIVATE KEY-----",Secret
+"List of government tax IDs for executives: SSN 000-12-3456, Passport 883719A.",Secret
+"Confidential patent claims: This method encrypts file fragments dynamically using chaotic mapping.",Secret
+"Primary bank account routing details: Routing number 021000021, account number 449281723.",Secret
