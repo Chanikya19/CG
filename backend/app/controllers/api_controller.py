@@ -207,6 +207,145 @@ def login_user():
         "token": token
     }), 200
 
+def admin_login_user():
+    data = request.get_json() or {}
+    email = data.get('email') or data.get('identifier')
+    password = data.get('password')
+
+    if not email or not password:
+        return jsonify({"error": "Missing identity credentials"}), 400
+
+    user = User.query.filter_by(email=email).first()
+
+    # Timing countermeasure: dummy salt hash match
+    dummy_hash = "$2b$12$e53j/E6L34yO1y8h7k7cOeP8R7Wb4S1e7N5w4E8R9T0Y1U2I3O4P5"
+
+    if not user:
+        bcrypt.checkpw(b"dummy", dummy_hash.encode('utf-8'))
+        log_event(
+            user_id=None,
+            action='ADMIN_LOGIN_FAILED',
+            module='Authentication',
+            file_name=None,
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get('User-Agent', 'Unknown'),
+            details={"email": email, "message": "Failed admin login attempt (user not found)."},
+            status='failed'
+        )
+        return jsonify({"error": "Invalid credentials"}), 401
+
+    if user.lockout_until and user.lockout_until > datetime.utcnow():
+        bcrypt.checkpw(b"dummy", dummy_hash.encode('utf-8'))
+        log_event(
+            user_id=user.id,
+            action='ADMIN_LOGIN_FAILED',
+            module='Authentication',
+            file_name=None,
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get('User-Agent', 'Unknown'),
+            details={"message": "Failed admin login attempt (account locked out)."},
+            status='failed'
+        )
+        return jsonify({"error": "Invalid credentials"}), 401
+
+    if user.status != 'active':
+        bcrypt.checkpw(b"dummy", dummy_hash.encode('utf-8'))
+        log_event(
+            user_id=user.id,
+            action='ADMIN_LOGIN_FAILED',
+            module='Authentication',
+            file_name=None,
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get('User-Agent', 'Unknown'),
+            details={"message": "Failed admin login attempt (user suspended)."},
+            status='failed'
+        )
+        return jsonify({"error": "Invalid credentials"}), 401
+
+    if not bcrypt.checkpw(password.encode('utf-8'), user.password_hash.encode('utf-8')):
+        user.failed_login_attempts += 1
+        if user.failed_login_attempts >= 3:
+            user.lockout_until = datetime.utcnow() + timedelta(minutes=15)
+            trigger_security_alert(
+                user_id=user.id,
+                alert_type='Multiple failed login attempts',
+                severity='HIGH',
+                message="Operator account locked due to 3 consecutive authentication failures."
+            )
+            log_event(
+                user_id=user.id,
+                action='ADMIN_ACCOUNT_LOCKED',
+                module='Authentication',
+                file_name=None,
+                ip_address=request.remote_addr,
+                user_agent=request.headers.get('User-Agent', 'Unknown'),
+                details={"message": "Admin account locked due to too many failed login attempts."},
+                status='failed'
+            )
+        db.session.commit()
+
+        log_event(
+            user_id=user.id,
+            action='ADMIN_LOGIN_FAILED',
+            module='Authentication',
+            file_name=None,
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get('User-Agent', 'Unknown'),
+            details={"message": "Failed admin login attempt (incorrect password)."},
+            status='failed'
+        )
+        return jsonify({"error": "Invalid credentials"}), 401
+
+    # Verify user.role is actually 'admin'
+    if user.role != 'admin':
+        log_event(
+            user_id=user.id,
+            action='ADMIN_UNAUTHORIZED_ACCESS',
+            module='Authentication',
+            file_name=None,
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get('User-Agent', 'Unknown'),
+            details={"message": f"Normal user {user.email} attempted to log in through admin gateway."},
+            status='failed'
+        )
+        trigger_security_alert(
+            user_id=user.id,
+            alert_type='Unauthorized admin login attempt',
+            severity='HIGH',
+            message=f"Normal operator {user.email} attempted to authenticate through admin gateway."
+        )
+        return jsonify({"error": "Access denied. Admin privileges required."}), 403
+
+    # Reset attempts on success
+    user.failed_login_attempts = 0
+    user.lockout_until = None
+    db.session.commit()
+
+    # Generate cryptographically signed JWT token
+    token = encode_auth_token(user.id)
+
+    log_event(
+        user_id=user.id,
+        action='ADMIN_LOGIN_SUCCESS',
+        module='Authentication',
+        file_name=None,
+        ip_address=request.remote_addr,
+        user_agent=request.headers.get('User-Agent', 'Unknown'),
+        details={"message": f"Administrator session initiated for: {user.full_name}"},
+        status='success'
+    )
+
+    return jsonify({
+        "message": "Admin login successful",
+        "user": {
+            "id": user.id,
+            "full_name": user.full_name,
+            "email": user.email,
+            "role": user.role
+        },
+        "token": token
+    }), 200
+
 # ==========================================
 # 2. Cryptography Controller
 # ==========================================

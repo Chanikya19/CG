@@ -149,3 +149,35 @@ def token_required(f):
         return f(current_user, *args, **kwargs)
 
     return decorated
+
+def admin_required(f):
+    """
+    Flask endpoint decorator that verifies the current user role is 'admin'.
+    Assumes it is run after token_required wrapper (receives current_user).
+    """
+    @wraps(f)
+    def decorated(current_user, *args, **kwargs):
+        if current_user.role != 'admin':
+            alert = SecurityAlert(
+                user_id=current_user.id,
+                alert_type='Unauthorized admin access',
+                severity='HIGH',
+                message=f"Operator {current_user.email} (role: {current_user.role}) attempted to access administrative resource.",
+                ip_address=request.remote_addr,
+                status='unresolved'
+            )
+            db.session.add(alert)
+            log = ActivityLog(
+                user_id=current_user.id,
+                action='UNAUTHORIZED_ACCESS',
+                module='Authentication',
+                ip_address=request.remote_addr,
+                user_agent=request.headers.get('User-Agent', 'Unknown'),
+                status='blocked',
+                details={"reason": "Admin privilege check failed"}
+            )
+            db.session.add(log)
+            db.session.commit()
+            return jsonify({"error": "Admin privilege required."}), 403
+        return f(current_user, *args, **kwargs)
+    return decorated

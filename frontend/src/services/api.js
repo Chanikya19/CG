@@ -31,8 +31,12 @@ apiClient.interceptors.response.use(
       localStorage.removeItem('cipherguard_user');
       sessionStorage.removeItem('cipherguard_token');
       sessionStorage.removeItem('cipherguard_user');
-      if (window.location.pathname !== '/login' && window.location.pathname !== '/register') {
-        window.location.href = '/login';
+      if (window.location.pathname !== '/login' && window.location.pathname !== '/register' && window.location.pathname !== '/admin/login') {
+        if (window.location.pathname.startsWith('/admin') || window.location.pathname === '/reports') {
+          window.location.href = '/admin/login';
+        } else {
+          window.location.href = '/login';
+        }
       }
     }
     return Promise.reject(error);
@@ -43,6 +47,15 @@ apiClient.interceptors.response.use(
 export const authAPI = {
   login: async (email, password, rememberMe = false) => {
     const res = await apiClient.post('/login', { email, password });
+    if (res.data.token) {
+      const storage = rememberMe ? localStorage : sessionStorage;
+      storage.setItem('cipherguard_token', res.data.token);
+      storage.setItem('cipherguard_user', JSON.stringify(res.data.user));
+    }
+    return res.data;
+  },
+  adminLogin: async (email, password, rememberMe = false) => {
+    const res = await apiClient.post('/admin/login', { email, password });
     if (res.data.token) {
       const storage = rememberMe ? localStorage : sessionStorage;
       storage.setItem('cipherguard_token', res.data.token);
@@ -194,6 +207,10 @@ export const auditAPI = {
   },
   getStatistics: async () => {
     const res = await apiClient.get('/statistics');
+    return res.data;
+  },
+  getAdminDashboard: async () => {
+    const res = await apiClient.get('/admin/dashboard');
     return res.data;
   }
 };

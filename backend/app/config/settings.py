@@ -7,6 +7,8 @@ load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path
 class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY', 'cipherguard-super-secret-key-2026')
     JWT_SECRET = os.environ.get('JWT_SECRET', 'cipherguard-jwt-token-signing-secret')
+    ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@example.com')
+    ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD')
     
     # Configure database URI pointing to MySQL or local SQLite fallback
     SQLALCHEMY_DATABASE_URI = os.environ.get(

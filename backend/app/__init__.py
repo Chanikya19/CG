@@ -81,4 +81,8 @@ def create_app(config_class=Config):
         except Exception:
             db.session.rollback()
 
+        # Bootstrap admin user from environment variables
+        from app.utils.bootstrap import bootstrap_admin
+        bootstrap_admin(app)
+
     return app

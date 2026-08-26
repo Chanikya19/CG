@@ -7,6 +7,7 @@ import DashboardLayout from './layout/DashboardLayout';
 
 // Components
 import ProtectedRoute from './components/ProtectedRoute';
+import AdminProtectedRoute from './components/AdminProtectedRoute';
 
 // Pages
 import Login from './pages/Login';
@@ -23,6 +24,8 @@ import SharedLinkResolver from './pages/SharedLinkResolver';
 import Analytics from './pages/Analytics';
 import SecurityReports from './pages/SecurityReports';
 import Settings from './pages/Settings';
+import AdminLogin from './pages/AdminLogin';
+import AdminDashboard from './pages/AdminDashboard';
 
 export default function App() {
   return (
@@ -32,6 +35,7 @@ export default function App() {
 
         {/* Auth Routes (Unauthenticated Layout) */}
         <Route path="/login" element={<Login />} />
+        <Route path="/admin/login" element={<AdminLogin />} />
         <Route path="/register" element={<Register />} />
 
         {/* Dashboard Routes (Wrapped in DashboardLayout and ProtectedRoute) */}
@@ -41,6 +45,14 @@ export default function App() {
               <Dashboard />
             </DashboardLayout>
           </ProtectedRoute>
+        } />
+
+        <Route path="/admin/dashboard" element={
+          <AdminProtectedRoute>
+            <DashboardLayout>
+              <AdminDashboard />
+            </DashboardLayout>
+          </AdminProtectedRoute>
         } />
         
         <Route path="/upload" element={
@@ -102,11 +114,11 @@ export default function App() {
         } />
 
         <Route path="/reports" element={
-          <ProtectedRoute>
+          <AdminProtectedRoute>
             <DashboardLayout>
               <SecurityReports />
             </DashboardLayout>
-          </ProtectedRoute>
+          </AdminProtectedRoute>
         } />
 
         <Route path="/profile" element={

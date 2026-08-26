@@ -31,22 +31,34 @@ export default function DashboardLayout({ children }) {
   const displayName = user?.full_name || 'Security Operator';
   const displayInitials = displayName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() || 'CG';
   
-  const menuItems = [
-    { name: 'Dashboard', path: '/dashboard', icon: Activity },
-    { name: 'Upload File', path: '/upload', icon: UploadCloud },
-    { name: 'File Integrity', path: '/verify', icon: ShieldCheck },
-    { name: 'Encryption Status', path: '/encryption-status', icon: Key },
-    { name: 'Secure Sharing', path: '/share', icon: Share2 },
-    { name: 'Analytics', path: '/analytics', icon: BarChart3 },
-    { name: 'Security Reports', path: '/reports', icon: AlertTriangle },
+  const allMenuItems = [
+    { name: 'Admin Dashboard', path: '/admin/dashboard', icon: Activity, adminOnly: true },
+    { name: 'Dashboard', path: '/dashboard', icon: Activity, userOnly: true },
+    { name: 'Upload File', path: '/upload', icon: UploadCloud, userOnly: true },
+    { name: 'File Integrity', path: '/verify', icon: ShieldCheck, userOnly: true },
+    { name: 'Encryption Status', path: '/encryption-status', icon: Key, userOnly: true },
+    { name: 'Secure Sharing', path: '/share', icon: Share2, userOnly: true },
+    { name: 'Analytics', path: '/analytics', icon: BarChart3, userOnly: true },
+    { name: 'Security Reports', path: '/reports', icon: AlertTriangle, adminOnly: true },
     { name: 'Activity Logs', path: '/logs', icon: FileText },
     { name: 'Profile', path: '/profile', icon: User },
     { name: 'Settings', path: '/settings', icon: SettingsIcon },
   ];
 
+  const menuItems = allMenuItems.filter(item => {
+    if (item.adminOnly && user?.role !== 'admin') return false;
+    if (item.userOnly && user?.role === 'admin') return false;
+    return true;
+  });
+
   const handleLogout = () => {
+    const isAdmin = user?.role === 'admin';
     authAPI.logout();
-    navigate('/login');
+    if (isAdmin) {
+      navigate('/admin/login');
+    } else {
+      navigate('/login');
+    }
   };
 
   const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);

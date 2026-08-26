@@ -276,3 +276,39 @@ The platform utilizes the following centralised parameters (defined in [`constan
 - **IND-CCA2 Security**: RSA-OAEP is mathematically proven to be secure against adaptive chosen-ciphertext attacks (IND-CCA2). It utilizes a Feistel network to randomize the plaintext envelope prior to modular exponentiation, ensuring decryption checks fail uniformly and securely without leaking side-channel data.
 - **Zero-Knowledge Isolation**: RSA private keys are encrypted on the database at rest under the server's master key via AES-256-GCM. Decrypted downloads of Secret files strictly require the user's private key PEM, ensuring zero-knowledge key isolation. Master keys and configuration secrets are configured solely through environment configurations and never exposed to the client.
 
+---
+
+## 🔑 Administrative Authentication & RBAC
+
+CipherGuard enforces a secure Role-Based Access Control (RBAC) boundary between normal operators and system administrators.
+
+### Access Levels Comparison
+
+| Feature / Resource | Normal User (`role = 'user'`) | Admin User (`role = 'admin'`) |
+| :--- | :---: | :---: |
+| Normal User Login | ✅ | ✅ |
+| Admin Command Login | ❌ | ✅ |
+| Personal File Vault & Encryption | ✅ | ✅ |
+| Personal Activity Logs & Profile | ✅ | ✅ |
+| System-Wide Analytics Dashboard | ❌ | ✅ |
+| Compliance Security Reports | ❌ | ✅ |
+| Global System Activity Logs | ❌ | ✅ |
+| Security Incident Resolution | ❌ | ✅ |
+
+### Admin Seeding / Bootstrap Procedure
+The primary system administrator is provisioned idempotently during the application's initialization context.
+
+1. Configure variables in your `.env` configuration file:
+   ```env
+   ADMIN_EMAIL=admin@cipherguard.io
+   ADMIN_PASSWORD=Configure_Secure_Passphrase_123!
+   ```
+2. Start the Flask backend. The startup script checks if any account with `role = 'admin'` exists. If not, it creates a new administrator with a bcrypt-hashed password hash and a cryptographically generated 2048-bit RSA keypair.
+3. If an administrator is already seeded, the bootstrap procedure terminates gracefully without modifying passwords or configuration settings.
+
+### Security Configurations & Guardrails
+- **Double-Layer Authorization**: Admin routes (e.g. `/api/admin/...`) require authentication through the `@token_required` decorator followed by validation through the `@admin_required` decorator.
+- **Client-Side Menu Obfuscation**: Sidebar links for system-wide auditing and reporting are hidden for non-admin accounts.
+- **Verification Boundaries**: Role checks occur entirely on the server-side, querying user properties straight from the database context instead of trusting JWT claims or client local storage objects.
+
+
