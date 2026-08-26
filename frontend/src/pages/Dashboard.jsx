@@ -34,7 +34,7 @@ import {
   Legend,
   Filler
 } from 'chart.js';
-import { Line, Doughnut } from 'react-chartjs-2';
+import { Line, Doughnut, Bar } from 'react-chartjs-2';
 import GlassCard from '../components/GlassCard';
 import { auditAPI, dlpAPI } from '../services/api';
 
@@ -50,6 +50,38 @@ ChartJS.register(
   Legend,
   Filler
 );
+
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error("ErrorBoundary caught an error:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-2xl text-center text-xs text-rose-400">
+          <p className="font-semibold">Failed to render visual analytics.</p>
+          <button 
+            onClick={() => this.setState({ hasError: false })}
+            className="mt-2 px-3 py-1 bg-rose-500/20 hover:bg-rose-500/30 rounded-xl text-white transition-all text-[10px] font-bold"
+          >
+            Reset
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -74,6 +106,7 @@ export default function Dashboard() {
 
   // Module 5 state variables
   const [alerts, setAlerts] = useState([]);
+  const [statsData, setStatsData] = useState(null);
 
   const fetchHistory = async () => {
     try {
@@ -94,6 +127,14 @@ export default function Dashboard() {
         setDashboardError("Unable to load dashboard data. Please try again.");
       }
     }
+    async function loadStats() {
+      try {
+        const data = await auditAPI.getStatistics();
+        setStatsData(data);
+      } catch (err) {
+        console.error("Failed to load statistics metrics", err);
+      }
+    }
     async function loadAlerts() {
       try {
         const data = await auditAPI.getSecurityAlerts();
@@ -103,7 +144,7 @@ export default function Dashboard() {
       }
     }
     async function init() {
-      await Promise.all([loadSummary(), fetchHistory(), loadAlerts()]);
+      await Promise.all([loadSummary(), loadStats(), fetchHistory(), loadAlerts()]);
       setLoading(false);
     }
     init();
@@ -122,8 +163,9 @@ export default function Dashboard() {
       setClassificationResult(result);
       await fetchHistory();
       // Reload stats to reflect new classification counts
-      const data = await auditAPI.getDashboard();
+      const [data, stats] = await Promise.all([auditAPI.getDashboard(), auditAPI.getStatistics()]);
       setDashboardData(data);
+      setStatsData(stats);
     } catch (err) {
       console.error("Classification failed", err);
       setClassificationError(err.response?.data?.error || "Failed to classify document. Please check file format.");
@@ -220,6 +262,58 @@ export default function Dashboard() {
   const user = userString ? JSON.parse(userString) : null;
   const isAdmin = user?.role === 'admin';
 
+  // Shared generic chart options for styling
+  const baseChartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        position: 'bottom',
+        labels: { color: '#9ca3af', boxWidth: 10, font: { family: 'Outfit', size: 10 } }
+      },
+      tooltip: {
+        backgroundColor: '#0f172a',
+        titleFont: { size: 10, family: 'Outfit' },
+        bodyFont: { size: 11, family: 'Outfit' },
+        borderColor: '#334155',
+        borderWidth: 1
+      }
+    },
+    scales: {
+      x: { grid: { color: 'rgba(255,255,255,0.03)' }, ticks: { color: '#9ca3af', font: { family: 'Outfit', size: 9 } } },
+      y: { grid: { color: 'rgba(255,255,255,0.03)' }, ticks: { color: '#9ca3af', font: { family: 'Outfit', size: 9 }, stepSize: 1 } }
+    }
+  };
+
+  const lineChartOptions = {
+    ...baseChartOptions,
+    plugins: {
+      ...baseChartOptions.plugins,
+      legend: {
+        position: 'top',
+        labels: { color: '#9ca3af', font: { family: 'Outfit', size: 10 } }
+      }
+    }
+  };
+
+  const doughnutChartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        position: 'right',
+        labels: { color: '#9ca3af', font: { family: 'Outfit', size: 10 }, boxWidth: 12 }
+      },
+      tooltip: {
+        backgroundColor: '#0f172a',
+        titleFont: { size: 10, family: 'Outfit' },
+        bodyFont: { size: 11, family: 'Outfit' },
+        borderColor: '#334155',
+        borderWidth: 1
+      }
+    }
+  };
+
   // DLP Violations Trend Chart
   const lineChartData = {
     labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
@@ -243,23 +337,9 @@ export default function Dashboard() {
     ],
   };
 
-  const lineChartOptions = {
-    responsive: true,
-    plugins: {
-      legend: {
-        position: 'top',
-        labels: { color: '#9ca3af', font: { family: 'Outfit' } }
-      }
-    },
-    scales: {
-      x: { grid: { color: 'rgba(255,255,255,0.03)' }, ticks: { color: '#9ca3af' } },
-      y: { grid: { color: 'rgba(255,255,255,0.03)' }, ticks: { color: '#9ca3af' } }
-    }
-  };
-
-  // Files by classification Doughnut
+  // 1. File classification: Public / Confidential / Secret
   const distribution = dashboardData?.classification_distribution || { Public: 0, Confidential: 0, Secret: 0 };
-  const doughnutChartData = {
+  const classificationChartData = {
     labels: ['Public', 'Confidential', 'Secret'],
     datasets: [
       {
@@ -275,14 +355,82 @@ export default function Dashboard() {
     ],
   };
 
-  const doughnutChartOptions = {
-    responsive: true,
-    plugins: {
-      legend: {
-        position: 'right',
-        labels: { color: '#9ca3af', font: { family: 'Outfit' } }
+  // 2. Encryption usage: AES-128, AES-256, Hybrid AES + RSA
+  const encryptionChartData = {
+    labels: statsData?.algorithms_bar?.labels || ['AES-128-GCM', 'AES-256-GCM', 'Hybrid (AES+RSA)'],
+    datasets: [
+      {
+        data: statsData?.algorithms_bar?.data || [0, 0, 0],
+        backgroundColor: [
+          'rgba(59, 130, 246, 0.65)',
+          'rgba(99, 102, 241, 0.65)',
+          'rgba(168, 85, 247, 0.65)'
+        ],
+        borderColor: 'rgba(255,255,255,0.05)',
+        borderWidth: 1,
       }
-    }
+    ]
+  };
+
+  // 3. Integrity: Verified / Tampered
+  const integrityChartData = {
+    labels: statsData?.integrity_doughnut?.labels || ['Verified Intact', 'Tampered/Missing'],
+    datasets: [
+      {
+        data: statsData?.integrity_doughnut?.data || [0, 0],
+        backgroundColor: [
+          'rgba(16, 185, 129, 0.65)', // Emerald
+          'rgba(239, 68, 68, 0.65)'   // Rose
+        ],
+        borderColor: 'rgba(255,255,255,0.05)',
+        borderWidth: 1,
+      }
+    ]
+  };
+
+  // 4. File activity over time
+  const fileActivityChartData = {
+    labels: statsData?.uploads_line?.labels || [],
+    datasets: [
+      {
+        fill: true,
+        label: 'File Uploads',
+        data: statsData?.uploads_line?.data || [],
+        borderColor: '#a855f7',
+        backgroundColor: 'rgba(168, 85, 247, 0.1)',
+        tension: 0.35,
+      }
+    ]
+  };
+
+  // 5. Sharing activity over time
+  const sharingActivityChartData = {
+    labels: statsData?.sharing_line?.labels || [],
+    datasets: [
+      {
+        fill: true,
+        label: 'Shares & Accesses',
+        data: statsData?.sharing_line?.data || [],
+        borderColor: '#06b6d4',
+        backgroundColor: 'rgba(6, 182, 212, 0.1)',
+        tension: 0.35,
+      }
+    ]
+  };
+
+  // 6. Failed login attempts
+  const failedLoginsChartData = {
+    labels: statsData?.failed_logins_line?.labels || [],
+    datasets: [
+      {
+        label: 'Failed Logins',
+        data: statsData?.failed_logins_line?.data || [],
+        backgroundColor: 'rgba(244, 63, 94, 0.65)',
+        borderColor: 'rgba(255,255,255,0.05)',
+        borderWidth: 1,
+        borderRadius: 6
+      }
+    ]
   };
 
   const getLabelColor = (label) => {
@@ -333,26 +481,24 @@ export default function Dashboard() {
       </div>
 
       {/* Stats Cards Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        {isAdmin && (
-          <GlassCard className="flex items-start gap-3 py-3 px-4" glow="blue">
-            <div className="p-2.5 bg-blue-500/10 rounded-xl text-blue-400">
-              <Users className="w-5 h-5" />
-            </div>
-            <div className="space-y-0.5">
-              <span className="block text-[10px] text-gray-500 uppercase font-bold tracking-wider">Total Users</span>
-              <span className="block text-lg font-bold text-white">{dashboardData?.stats?.total_users || '0'}</span>
-            </div>
-          </GlassCard>
-        )}
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+        <GlassCard className="flex items-start gap-3 py-3 px-4" glow="blue">
+          <div className="p-2.5 bg-blue-500/10 rounded-xl text-blue-400">
+            <Users className="w-5 h-5" />
+          </div>
+          <div className="space-y-0.5">
+            <span className="block text-[10px] text-gray-500 uppercase font-bold tracking-wider">Total Users</span>
+            <span className="block text-lg font-bold text-white">{dashboardData?.stats?.total_users ?? '0'}</span>
+          </div>
+        </GlassCard>
         
         <GlassCard className="flex items-start gap-3 py-3 px-4" glow="purple">
           <div className="p-2.5 bg-purple-500/10 rounded-xl text-purple-300">
             <FileText className="w-5 h-5" />
           </div>
           <div className="space-y-0.5">
-            <span className="block text-[10px] text-gray-500 uppercase font-bold tracking-wider">Vault Files</span>
-            <span className="block text-lg font-bold text-white">{dashboardData?.stats?.secured_files || '0'}</span>
+            <span className="block text-[10px] text-gray-500 uppercase font-bold tracking-wider">Total Files</span>
+            <span className="block text-lg font-bold text-white">{dashboardData?.stats?.secured_files ?? '0'}</span>
           </div>
         </GlassCard>
 
@@ -362,7 +508,7 @@ export default function Dashboard() {
           </div>
           <div className="space-y-0.5">
             <span className="block text-[10px] text-gray-500 uppercase font-bold tracking-wider">Encrypted Files</span>
-            <span className="block text-lg font-bold text-white">{dashboardData?.stats?.encrypted_files || '0'}</span>
+            <span className="block text-lg font-bold text-white">{dashboardData?.stats?.encrypted_files ?? '0'}</span>
           </div>
         </GlassCard>
 
@@ -371,8 +517,8 @@ export default function Dashboard() {
             <Share2 className="w-5 h-5" />
           </div>
           <div className="space-y-0.5">
-            <span className="block text-[10px] text-gray-500 uppercase font-bold tracking-wider">Shared Links</span>
-            <span className="block text-lg font-bold text-white">{dashboardData?.stats?.shared_files || '0'}</span>
+            <span className="block text-[10px] text-gray-500 uppercase font-bold tracking-wider">Shared Files</span>
+            <span className="block text-lg font-bold text-white">{dashboardData?.stats?.shared_files ?? '0'}</span>
           </div>
         </GlassCard>
 
@@ -381,8 +527,20 @@ export default function Dashboard() {
             <ShieldCheck className="w-5 h-5" />
           </div>
           <div className="space-y-0.5">
-            <span className="block text-[10px] text-gray-500 uppercase font-bold tracking-wider">Verified Intact</span>
-            <span className="block text-lg font-bold text-white">{dashboardData?.stats?.verified_files || '0'}</span>
+            <span className="block text-[10px] text-gray-500 uppercase font-bold tracking-wider">Verified Files</span>
+            <span className="block text-lg font-bold text-white">{dashboardData?.stats?.verified_files ?? '0'}</span>
+          </div>
+        </GlassCard>
+
+        <GlassCard className={`flex items-start gap-3 py-3 px-4 ${dashboardData?.stats?.tampered_files > 0 ? 'border border-rose-500/30' : ''}`} glow={dashboardData?.stats?.tampered_files > 0 ? "rose" : "purple"}>
+          <div className={`p-2.5 rounded-xl ${dashboardData?.stats?.tampered_files > 0 ? 'bg-rose-500/15 text-rose-400' : 'bg-white/5 text-gray-400'}`}>
+            <ShieldAlert className="w-5 h-5" />
+          </div>
+          <div className="space-y-0.5">
+            <span className="block text-[10px] text-gray-500 uppercase font-bold tracking-wider">Tampered Files</span>
+            <span className={`block text-lg font-bold ${dashboardData?.stats?.tampered_files > 0 ? 'text-rose-400 font-extrabold animate-pulse' : 'text-white'}`}>
+              {dashboardData?.stats?.tampered_files ?? '0'}
+            </span>
           </div>
         </GlassCard>
 
@@ -393,37 +551,185 @@ export default function Dashboard() {
           <div className="space-y-0.5">
             <span className="block text-[10px] text-gray-500 uppercase font-bold tracking-wider">Security Alerts</span>
             <span className={`block text-lg font-bold ${dashboardData?.stats?.security_alerts > 0 ? 'text-rose-400' : 'text-white'}`}>
-              {dashboardData?.stats?.security_alerts || '0'}
+              {dashboardData?.stats?.security_alerts ?? '0'}
             </span>
           </div>
         </GlassCard>
       </div>
 
-      {/* Visual Analytics Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <GlassCard className="lg:col-span-2 space-y-4">
-          <div>
-            <h3 className="text-base font-bold text-white flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-purple-500 inline-block"></span> DLP Protection Trend
-            </h3>
-            <p className="text-xs text-gray-400 mt-0.5">Scans executed and potential leak intercepts blocked daily.</p>
+      {/* Security Score Panel */}
+      <GlassCard className="p-6 space-y-6" glow={dashboardData?.stats?.security_score >= 90 ? "emerald" : dashboardData?.stats?.security_score >= 70 ? "amber" : "rose"}>
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+          <div className="flex items-center gap-4">
+            <div className={`w-20 h-20 rounded-full border-4 flex flex-col items-center justify-center font-extrabold ${
+              dashboardData?.stats?.security_score >= 90 ? 'border-emerald-500 text-emerald-400' :
+              dashboardData?.stats?.security_score >= 70 ? 'border-amber-500 text-amber-400' :
+              'border-rose-500 text-rose-400'
+            }`}>
+              <span className="text-2xl">{dashboardData?.stats?.security_score ?? 100}</span>
+              <span className="text-[9px] uppercase text-gray-500 tracking-wider">Score</span>
+            </div>
+            <div>
+              <h3 className="text-lg font-extrabold text-white flex items-center gap-2">
+                CipherGuard Security Score
+              </h3>
+              <p className="text-xs text-gray-400 max-w-xl">
+                Calculated dynamically based on active unresolved threats, file tampering alerts, encryption coverage, and integrity verification status.
+              </p>
+            </div>
           </div>
-          <div className="h-64 flex items-center justify-center">
-            <Line data={lineChartData} options={lineChartOptions} />
+          <div className={`px-4 py-2 rounded-xl border text-xs font-bold tracking-widest ${
+            dashboardData?.stats?.security_score >= 90 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+            dashboardData?.stats?.security_score >= 70 ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+            'bg-rose-500/10 text-rose-400 border-rose-500/20'
+          }`}>
+            SYSTEM RATING: {
+              dashboardData?.stats?.security_score >= 90 ? 'OPTIMAL' :
+              dashboardData?.stats?.security_score >= 70 ? 'WARNING' :
+              'CRITICAL'
+            }
           </div>
-        </GlassCard>
+        </div>
 
-        <GlassCard className="space-y-4">
-          <div>
-            <h3 className="text-base font-bold text-white flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block"></span> File Classification
-            </h3>
-            <p className="text-xs text-gray-400 mt-0.5">Distribution of secured vault documents by sensitivity label.</p>
-          </div>
-          <div className="h-64 flex items-center justify-center">
-            <Doughnut data={doughnutChartData} options={doughnutChartOptions} />
-          </div>
-        </GlassCard>
+        {/* Contributing Factors */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pt-2">
+          {(dashboardData?.stats?.security_factors || []).map((factor, idx) => (
+            <div key={idx} className="p-4 bg-white/5 border border-gray-800 rounded-2xl space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-gray-300">{factor.name}</span>
+                <span className={`px-2 py-0.5 rounded-lg text-[9px] font-extrabold tracking-wider ${
+                  factor.status === 'Good' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                  factor.status === 'Danger' ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' :
+                  'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                }`}>
+                  {factor.status}
+                </span>
+              </div>
+              <p className="text-[10px] text-gray-400 leading-relaxed min-h-[30px]">{factor.description}</p>
+              <div className="flex items-center justify-between border-t border-gray-800/50 pt-2 text-[10px]">
+                <span className="text-gray-500">Deduction</span>
+                <span className={`font-bold ${factor.deduction > 0 ? 'text-rose-400' : 'text-gray-400'}`}>
+                  {factor.deduction > 0 ? `-${factor.deduction} pts` : 'None'}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </GlassCard>
+
+      {/* Visual Analytics Grid */}
+      <div className="space-y-6">
+        <div>
+          <h3 className="text-lg font-bold text-white flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-purple-500 inline-block animate-pulse"></span> Telemetry & Cryptographic Analytics
+          </h3>
+          <p className="text-xs text-gray-400 mt-0.5">Real-time charts monitoring document sensitivity distribution, ciphers usage, and platform audit activity.</p>
+        </div>
+
+        {/* First Row: Distribution & Categorization Charts */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <ErrorBoundary>
+            <GlassCard className="space-y-4" glow="blue">
+              <div>
+                <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                  File Classification
+                </h4>
+                <p className="text-[10px] text-gray-400">Distribution of secured vault documents by sensitivity label.</p>
+              </div>
+              <div className="h-56 flex items-center justify-center">
+                <Doughnut data={classificationChartData} options={doughnutChartOptions} />
+              </div>
+            </GlassCard>
+          </ErrorBoundary>
+
+          <ErrorBoundary>
+            <GlassCard className="space-y-4" glow="purple">
+              <div>
+                <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                  Encryption Algorithms
+                </h4>
+                <p className="text-[10px] text-gray-400">Usage distribution of symmetrical ciphers and RSA key wraps.</p>
+              </div>
+              <div className="h-56 flex items-center justify-center">
+                <Doughnut data={encryptionChartData} options={doughnutChartOptions} />
+              </div>
+            </GlassCard>
+          </ErrorBoundary>
+
+          <ErrorBoundary>
+            <GlassCard className="space-y-4" glow="emerald">
+              <div>
+                <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                  Integrity Verification
+                </h4>
+                <p className="text-[10px] text-gray-400">Status ratio of verified intact documents vs tampered alerts.</p>
+              </div>
+              <div className="h-56 flex items-center justify-center">
+                <Doughnut data={integrityChartData} options={doughnutChartOptions} />
+              </div>
+            </GlassCard>
+          </ErrorBoundary>
+        </div>
+
+        {/* Second Row: Activity Trends over time */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <ErrorBoundary>
+            <GlassCard className="space-y-4" glow="purple">
+              <div>
+                <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                  File Activity over Time
+                </h4>
+                <p className="text-[10px] text-gray-400">Timeline of document uploads over the past 7 days.</p>
+              </div>
+              <div className="h-56 flex items-center justify-center">
+                <Line data={fileActivityChartData} options={lineChartOptions} />
+              </div>
+            </GlassCard>
+          </ErrorBoundary>
+
+          <ErrorBoundary>
+            <GlassCard className="space-y-4" glow="blue">
+              <div>
+                <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                  Sharing Activity
+                </h4>
+                <p className="text-[10px] text-gray-400">Daily timeline of sharing links generated and accessed.</p>
+              </div>
+              <div className="h-56 flex items-center justify-center">
+                <Line data={sharingActivityChartData} options={lineChartOptions} />
+              </div>
+            </GlassCard>
+          </ErrorBoundary>
+
+          <ErrorBoundary>
+            <GlassCard className="space-y-4" glow="rose">
+              <div>
+                <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                  Failed Login Attempts
+                </h4>
+                <p className="text-[10px] text-gray-400">Security event monitoring of failed authentication attempts.</p>
+              </div>
+              <div className="h-56 flex items-center justify-center">
+                <Bar data={failedLoginsChartData} options={lineChartOptions} />
+              </div>
+            </GlassCard>
+          </ErrorBoundary>
+        </div>
+
+        {/* Preservation of original DLP trend chart */}
+        <ErrorBoundary>
+          <GlassCard className="space-y-4">
+            <div>
+              <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                DLP Protection Trend
+              </h4>
+              <p className="text-[10px] text-gray-400">Scans executed and potential leak intercepts blocked daily.</p>
+            </div>
+            <div className="h-64 flex items-center justify-center">
+              <Line data={lineChartData} options={lineChartOptions} />
+            </div>
+          </GlassCard>
+        </ErrorBoundary>
       </div>
 
       {/* AI Classifier & DLP Audit Row */}

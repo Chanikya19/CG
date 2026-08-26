@@ -578,10 +578,17 @@ def get_dashboard_summary(current_user):
     total_files = File.query.count()
     total_encrypted = EncryptionKey.query.count()
     total_shared = FileSharing.query.count()
-    verified_files = FileIntegrity.query.count()
-    active_alerts_count = ActivityLog.query.filter(
-        (ActivityLog.status == 'failed') | (ActivityLog.status == 'blocked')
-    ).count()
+    
+    # Calculate verified and tampered files from latest IntegrityHistory for each file
+    latest_status = {}
+    for h in IntegrityHistory.query.order_by(IntegrityHistory.timestamp.asc()).all():
+        latest_status[h.file_id] = h.result
+
+    verified_files = sum(1 for status in latest_status.values() if status == 'VERIFIED')
+    tampered_files = sum(1 for status in latest_status.values() if status == 'TAMPERED')
+    
+    # Active security alerts count (unresolved alerts from SecurityAlert model)
+    active_alerts_count = SecurityAlert.query.filter_by(status='unresolved').count()
     
     # Calculate average compliance
     classifications = FileClassification.query.join(File).filter(File.owner_id == current_user.id).all()
@@ -591,6 +598,51 @@ def get_dashboard_summary(current_user):
     pub_count = FileClassification.query.join(File).filter(File.owner_id == current_user.id, FileClassification.classification_label == 'Public').count()
     conf_count = FileClassification.query.join(File).filter(File.owner_id == current_user.id, FileClassification.classification_label == 'Confidential').count()
     sec_count = FileClassification.query.join(File).filter(File.owner_id == current_user.id, FileClassification.classification_label == 'Secret').count()
+
+    # Calculate Security Score components
+    critical_alerts = SecurityAlert.query.filter_by(status='unresolved', severity='CRITICAL').count()
+    high_alerts = SecurityAlert.query.filter_by(status='unresolved', severity='HIGH').count()
+    medium_alerts = SecurityAlert.query.filter_by(status='unresolved', severity='MEDIUM').count()
+    low_alerts = SecurityAlert.query.filter_by(status='unresolved', severity='LOW').count()
+
+    alerts_deduction = min(40, (critical_alerts * 20) + (high_alerts * 10) + (medium_alerts * 5) + (low_alerts * 2))
+    tamper_deduction = min(40, tampered_files * 15)
+
+    enc_coverage_pct = (total_encrypted / total_files * 100) if total_files > 0 else 100.0
+    enc_deduction = min(10, (1 - (total_encrypted / total_files)) * 10) if total_files > 0 else 0.0
+
+    sig_count = FileIntegrity.query.count()
+    sig_coverage_pct = (sig_count / total_files * 100) if total_files > 0 else 100.0
+    sig_deduction = min(10, (1 - (sig_count / total_files)) * 10) if total_files > 0 else 0.0
+
+    security_score = max(0, int(100 - alerts_deduction - tamper_deduction - enc_deduction - sig_deduction))
+
+    security_factors = [
+        {
+            "name": "Security Alerts",
+            "status": "Good" if alerts_deduction == 0 else "Action Required",
+            "deduction": int(alerts_deduction),
+            "description": f"Deducted {int(alerts_deduction)} pts for {critical_alerts + high_alerts + medium_alerts + low_alerts} unresolved alert(s)."
+        },
+        {
+            "name": "File Tampering",
+            "status": "Good" if tamper_deduction == 0 else "Danger",
+            "deduction": int(tamper_deduction),
+            "description": f"Deducted {int(tamper_deduction)} pts for {tampered_files} tampered file(s) detected."
+        },
+        {
+            "name": "Encryption Coverage",
+            "status": "Good" if enc_coverage_pct >= 90 else "Improvement Needed",
+            "deduction": int(enc_deduction),
+            "description": f"Deducted {int(enc_deduction)} pts. Current coverage is {round(enc_coverage_pct, 1)}%."
+        },
+        {
+            "name": "Integrity Signatures",
+            "status": "Good" if sig_coverage_pct >= 90 else "Improvement Needed",
+            "deduction": int(sig_deduction),
+            "description": f"Deducted {int(sig_deduction)} pts. Current signature coverage is {round(sig_coverage_pct, 1)}%."
+        }
+    ]
 
     # 2. Recent Files
     files = File.query.filter_by(owner_id=current_user.id).order_by(File.created_at.desc()).limit(5).all()
@@ -648,8 +700,11 @@ def get_dashboard_summary(current_user):
             "encrypted_files": total_encrypted,
             "shared_files": total_shared,
             "verified_files": verified_files,
+            "tampered_files": tampered_files,
             "security_alerts": active_alerts_count,
-            "vulnerability_index": f"{round(avg_risk / 10, 2)} / 10"
+            "vulnerability_index": f"{round(avg_risk / 10, 2)} / 10",
+            "security_score": security_score,
+            "security_factors": security_factors
         },
         "recent_files": files_list,
         "classification_distribution": {
@@ -1881,6 +1936,34 @@ def get_statistics_endpoint(current_user):
                     tampered_count += 1
             else:
                 tampered_count += 1
+                
+    # 5. Sharing activity (FILE_SHARED or SHARE_ACCESSED events over past 7 days)
+    share_stats = db.session.query(
+        func.date(ActivityLog.timestamp).label('share_date'),
+        func.count(ActivityLog.id).label('share_count')
+    ).filter(ActivityLog.action.in_(['FILE_SHARED', 'SHARE_ACCESSED'])).group_by(func.date(ActivityLog.timestamp)).order_by(func.date(ActivityLog.timestamp).desc()).limit(7).all()
+    
+    daily_shares = {day: 0 for day in sorted_days}
+    for stat in share_stats:
+        date_str = str(stat.share_date)
+        if date_str in daily_shares:
+            daily_shares[date_str] = stat.share_count
+            
+    share_trend = [daily_shares[day] for day in sorted_days]
+
+    # 6. Failed login attempts (LOGIN_FAILED events over past 7 days)
+    login_fail_stats = db.session.query(
+        func.date(ActivityLog.timestamp).label('fail_date'),
+        func.count(ActivityLog.id).label('fail_count')
+    ).filter(ActivityLog.action == 'LOGIN_FAILED').group_by(func.date(ActivityLog.timestamp)).order_by(func.date(ActivityLog.timestamp).desc()).limit(7).all()
+    
+    daily_login_fails = {day: 0 for day in sorted_days}
+    for stat in login_fail_stats:
+        date_str = str(stat.fail_date)
+        if date_str in daily_login_fails:
+            daily_login_fails[date_str] = stat.fail_count
+            
+    login_fail_trend = [daily_login_fails[day] for day in sorted_days]
 
     return jsonify({
         "classification_pie": {
@@ -1898,6 +1981,14 @@ def get_statistics_endpoint(current_user):
         "integrity_doughnut": {
             "labels": ["Verified Intact", "Tampered/Missing"],
             "data": [verified_count, tampered_count]
+        },
+        "sharing_line": {
+            "labels": sorted_days,
+            "data": share_trend
+        },
+        "failed_logins_line": {
+            "labels": sorted_days,
+            "data": login_fail_trend
         }
     }), 200
 
