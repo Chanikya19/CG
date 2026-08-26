@@ -964,18 +964,15 @@ def download_file_decrypted(current_user, file_id):
     else:
         private_key_pem = request.form.get('private_key')
 
-    if not private_key_pem or private_key_pem.startswith("Secured on Server"):
-        private_key_pem = current_user.rsa_private_key
-
     classification = file.classification.classification_label if file.classification else 'Confidential'
     
     # Validation for Secret files
-    if classification == 'Secret' and not private_key_pem:
-        # Fallback to stored user private key for smoother local demonstration
-        if current_user.rsa_private_key:
-            private_key_pem = current_user.rsa_private_key
-        else:
+    if classification == 'Secret':
+        if not private_key_pem or private_key_pem.startswith("Secured on Server"):
             return jsonify({"error": "RSA Private Decryption Key is required for Secret (Hybrid Encrypted) vault assets"}), 400
+    else:
+        if not private_key_pem or private_key_pem.startswith("Secured on Server"):
+            private_key_pem = current_user.rsa_private_key
 
     enc_key = EncryptionKey.query.filter_by(file_id=file.id).first()
     if not enc_key:
@@ -1671,14 +1668,9 @@ def download_shared_file(token):
     else:
         private_key_pem = request.form.get('private_key')
 
-    if not private_key_pem or private_key_pem.startswith("Secured on Server"):
-        private_key_pem = file.owner.rsa_private_key
-
     classification = file.classification.classification_label if file.classification else 'Confidential'
-    if classification == 'Secret' and not private_key_pem:
-        if file.owner.rsa_private_key:
-            private_key_pem = file.owner.rsa_private_key
-        else:
+    if classification == 'Secret':
+        if not private_key_pem or private_key_pem.startswith("Secured on Server"):
             log_event(
                 user_id=share.owner_id,
                 action='SHARE_FAILED_ACCESS',
@@ -1691,6 +1683,9 @@ def download_shared_file(token):
                 status='failed'
             )
             return jsonify({"error": "Private decryption key is required to decrypt this Secret file"}), 400
+    else:
+        if not private_key_pem or private_key_pem.startswith("Secured on Server"):
+            private_key_pem = file.owner.rsa_private_key
 
     vault_dir = os.path.join(current_app.instance_path, 'vault')
     file_path = os.path.join(vault_dir, f"{file.checksum}.enc")

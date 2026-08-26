@@ -8,6 +8,13 @@ def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
 
+    # Raise startup exception for hardcoded secrets in production/development runtime mode
+    if not app.config.get('TESTING'):
+        if app.config.get('JWT_SECRET') == 'cipherguard-jwt-token-signing-secret':
+            raise RuntimeError("CRITICAL CONFIGURATION ERROR: You must configure a secure JWT_SECRET environment variable.")
+        if app.config.get('SECRET_KEY') == 'cipherguard-super-secret-key-2026':
+            raise RuntimeError("CRITICAL CONFIGURATION ERROR: You must configure a secure SECRET_KEY environment variable.")
+
     # Enable CORS for frontend requests
     CORS(app)
 

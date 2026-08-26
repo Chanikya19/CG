@@ -18,7 +18,41 @@ class User(db.Model):
     
     # Cryptographic Vault Keypair (zero-knowledge or demo)
     rsa_public_key = db.Column(db.Text, nullable=True)
-    rsa_private_key = db.Column(db.Text, nullable=True)
+    _rsa_private_key = db.Column('rsa_private_key', db.Text, nullable=True)
+
+    @property
+    def rsa_private_key(self):
+        if not self._rsa_private_key:
+            return None
+        from app.encryption.hybrid_engine import get_server_master_key
+        from app.encryption.aes_engine import decrypt_aes_gcm
+        import base64
+        try:
+            packed = base64.b64decode(self._rsa_private_key)
+            iv = packed[:12]
+            tag = packed[12:28]
+            ciphertext = packed[28:]
+            server_key = get_server_master_key()
+            decrypted = decrypt_aes_gcm(server_key, ciphertext, iv, tag)
+            return decrypted.decode('utf-8')
+        except Exception:
+            # Fallback for unencrypted legacy keys during testing or migration
+            return self._rsa_private_key
+
+    @rsa_private_key.setter
+    def rsa_private_key(self, val):
+        if not val:
+            self._rsa_private_key = None
+            return
+        from app.encryption.hybrid_engine import get_server_master_key
+        from app.encryption.aes_engine import encrypt_aes_gcm
+        import base64
+        try:
+            server_key = get_server_master_key()
+            ciphertext, iv, tag = encrypt_aes_gcm(server_key, val.encode('utf-8'))
+            self._rsa_private_key = base64.b64encode(iv + tag + ciphertext).decode('utf-8')
+        except Exception:
+            self._rsa_private_key = val
 
 
     # Relationships
