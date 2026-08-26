@@ -4,7 +4,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 import joblib
 
 def train():
@@ -29,7 +29,7 @@ def train():
 
     print("Evaluating CipherGuard text classifier structure...")
     
-    # Split dataset into train and test splits (stratified since we have 3 classes of 7 samples each)
+    # Split dataset into train and test splits (stratified since we have 3 classes)
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42, stratify=y)
     
     # Train the pipeline on the training split
@@ -43,6 +43,7 @@ def train():
     precision = precision_score(y_test, y_pred, average='weighted', zero_division=0)
     recall = recall_score(y_test, y_pred, average='weighted', zero_division=0)
     f1 = f1_score(y_test, y_pred, average='weighted', zero_division=0)
+    conf_matrix = confusion_matrix(y_test, y_pred, labels=['Public', 'Confidential', 'Secret'])
     
     print("-" * 50)
     print("Model Evaluation Metrics (Test Split):")
@@ -50,6 +51,13 @@ def train():
     print(f"  Precision : {precision * 100:.2f}%")
     print(f"  Recall    : {recall * 100:.2f}%")
     print(f"  F1-Score  : {f1 * 100:.2f}%")
+    print("-" * 50)
+    print("Confusion Matrix:")
+    print("                 Predicted")
+    print("                 Pub  Conf  Sec")
+    print(f"Actual Pub      [{conf_matrix[0][0]:3d}  {conf_matrix[0][1]:3d}  {conf_matrix[0][2]:3d}]")
+    print(f"       Conf     [{conf_matrix[1][0]:3d}  {conf_matrix[1][1]:3d}  {conf_matrix[1][2]:3d}]")
+    print(f"       Sec      [{conf_matrix[2][0]:3d}  {conf_matrix[2][1]:3d}  {conf_matrix[2][2]:3d}]")
     print("-" * 50)
     
     # Retrain pipeline on the complete dataset for production deploy

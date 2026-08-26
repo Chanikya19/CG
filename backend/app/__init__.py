@@ -74,4 +74,11 @@ def create_app(config_class=Config):
         except Exception:
             db.session.rollback()
 
+        # Gracefully add resolved_at to SecurityAlerts if not present
+        try:
+            db.session.execute(db.text("ALTER TABLE SecurityAlerts ADD COLUMN resolved_at DATETIME DEFAULT NULL"))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
     return app

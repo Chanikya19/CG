@@ -117,37 +117,30 @@ export default function Dashboard() {
     }
   };
 
-  useEffect(() => {
-    async function loadSummary() {
-      try {
-        const data = await auditAPI.getDashboard();
-        setDashboardData(data);
-      } catch (err) {
-        console.error("Failed to load dashboard metrics", err);
-        setDashboardError("Unable to load dashboard data. Please try again.");
-      }
-    }
-    async function loadStats() {
-      try {
-        const data = await auditAPI.getStatistics();
-        setStatsData(data);
-      } catch (err) {
-        console.error("Failed to load statistics metrics", err);
-      }
-    }
-    async function loadAlerts() {
-      try {
-        const data = await auditAPI.getSecurityAlerts();
-        setAlerts(Array.isArray(data) ? data.slice(0, 5) : []);
-      } catch (err) {
-        console.error("Failed to load alerts", err);
-      }
-    }
-    async function init() {
-      await Promise.all([loadSummary(), loadStats(), fetchHistory(), loadAlerts()]);
+  const handleRefresh = async () => {
+    setLoading(true);
+    setDashboardError('');
+    try {
+      const summaryData = await auditAPI.getDashboard();
+      setDashboardData(summaryData);
+      
+      const stats = await auditAPI.getStatistics();
+      setStatsData(stats);
+      
+      const alertsData = await auditAPI.getSecurityAlerts();
+      setAlerts(Array.isArray(alertsData) ? alertsData.slice(0, 5) : []);
+      
+      await fetchHistory();
+    } catch (err) {
+      console.error("Failed to refresh dashboard metrics", err);
+      setDashboardError("Unable to load dashboard data. Please try again.");
+    } finally {
       setLoading(false);
     }
-    init();
+  };
+
+  useEffect(() => {
+    handleRefresh();
   }, []);
 
   const handleClassifyUpload = async (file) => {
@@ -475,12 +468,22 @@ export default function Dashboard() {
           <h2 className="text-3xl font-extrabold tracking-tight text-white">Security Command Vault</h2>
           <p className="text-gray-400 text-sm mt-1">Real-time status overview, data leakage monitoring, and hybrid cryptosystem status.</p>
         </div>
-        <button 
-          onClick={() => navigate('/upload')}
-          className="flex items-center gap-2 px-5 py-3 rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-sm font-semibold tracking-wide text-white transition-all shadow-lg shadow-purple-500/10 active:scale-95"
-        >
-          <Lock className="w-4 h-4" /> Secure New File
-        </button>
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={handleRefresh}
+            className="flex items-center gap-2 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-gray-800 text-sm font-semibold tracking-wide text-gray-300 transition-all active:scale-95"
+            aria-label="Refresh Dashboard Telemetry"
+          >
+            <Clock className="w-4 h-4" /> Refresh Telemetry
+          </button>
+          <button 
+            onClick={() => navigate('/upload')}
+            className="flex items-center gap-2 px-5 py-3 rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-sm font-semibold tracking-wide text-white transition-all shadow-lg shadow-purple-500/10 active:scale-95"
+            aria-label="Secure New File"
+          >
+            <Lock className="w-4 h-4" /> Secure New File
+          </button>
+        </div>
       </div>
 
       {/* Stats Cards Grid */}
@@ -619,6 +622,154 @@ export default function Dashboard() {
           ))}
         </div>
       </GlassCard>
+
+      {/* Module 5 Security Telemetry & Command Monitoring Grid */}
+      <div className="space-y-4">
+        <div>
+          <h3 className="text-lg font-bold text-white flex items-center gap-2">
+            <ShieldCheck className="w-5 h-5 text-purple-400" /> Security Command Vault Monitoring
+          </h3>
+          <p className="text-xs text-gray-400 mt-0.5">Comprehensive audit and status reporting on encryption keys, DLP rules, sharing policies, and integrity checks.</p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {/* Encryption Monitoring */}
+          <GlassCard className="p-5 space-y-4" glow="blue">
+            <h4 className="text-sm font-extrabold text-blue-400 border-b border-gray-800 pb-2">Encryption & Ciphers Audit</h4>
+            <div className="space-y-3 text-xs">
+              <div className="flex justify-between">
+                <span className="text-gray-400">AES-256-GCM Files:</span>
+                <span className="font-bold text-white">{dashboardData?.stats?.encryption_monitoring?.aes256_count ?? 0}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400">AES-128-GCM Files:</span>
+                <span className="font-bold text-white">{dashboardData?.stats?.encryption_monitoring?.aes128_count ?? 0}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400">Key Versions (v1 / v2):</span>
+                <span className="font-bold text-white">
+                  {dashboardData?.stats?.encryption_monitoring?.versions?.v1 ?? 0} / {dashboardData?.stats?.encryption_monitoring?.versions?.v2 ?? 0}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400">Successful Encryptions:</span>
+                <span className="font-bold text-emerald-400">{dashboardData?.stats?.encryption_monitoring?.successful_encryptions ?? 0}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400">Failed Encryptions:</span>
+                <span className={`font-bold ${dashboardData?.stats?.encryption_monitoring?.failed_encryptions > 0 ? 'text-rose-450 font-extrabold animate-pulse' : 'text-gray-400'}`}>
+                  {dashboardData?.stats?.encryption_monitoring?.failed_encryptions ?? 0}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400">Decryption Failures:</span>
+                <span className={`font-bold ${dashboardData?.stats?.encryption_monitoring?.decryption_failures > 0 ? 'text-rose-450 font-extrabold animate-pulse' : 'text-gray-400'}`}>
+                  {dashboardData?.stats?.encryption_monitoring?.decryption_failures ?? 0}
+                </span>
+              </div>
+            </div>
+          </GlassCard>
+
+          {/* Integrity Monitoring */}
+          <GlassCard className="p-5 space-y-4" glow="emerald">
+            <h4 className="text-sm font-extrabold text-emerald-400 border-b border-gray-800 pb-2">Integrity & Signatures Audit</h4>
+            <div className="space-y-3 text-xs">
+              <div className="flex justify-between">
+                <span className="text-gray-400">Verified Files:</span>
+                <span className="font-bold text-emerald-400">{dashboardData?.stats?.verified_files ?? 0}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400">Tampered / Corrupted:</span>
+                <span className={`font-bold ${dashboardData?.stats?.tampered_files > 0 ? 'text-rose-400 font-extrabold animate-pulse' : 'text-gray-400'}`}>
+                  {dashboardData?.stats?.tampered_files ?? 0}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400">Failed verification tries:</span>
+                <span className={`font-bold ${dashboardData?.stats?.decryption_failures > 0 ? 'text-rose-405' : 'text-gray-400'}`}>
+                  {dashboardData?.stats?.encryption_monitoring?.decryption_failures ?? 0}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400">Active Integrity Log:</span>
+                <span className="font-bold text-white">SHA-256 Enforced</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400">Auto-Alert Trigger:</span>
+                <span className="font-bold text-emerald-400">Armed</span>
+              </div>
+            </div>
+          </GlassCard>
+
+          {/* AI/DLP Monitoring */}
+          <GlassCard className="p-5 space-y-4" glow="purple">
+            <h4 className="text-sm font-extrabold text-purple-400 border-b border-gray-800 pb-2">AI & DLP Classifier Audit</h4>
+            <div className="space-y-3 text-xs">
+              <div className="flex justify-between">
+                <span className="text-gray-400">Public Document Assets:</span>
+                <span className="font-bold text-white">{dashboardData?.stats?.ai_dlp_monitoring?.public_count ?? 0}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400">Confidential Assets:</span>
+                <span className="font-bold text-white">{dashboardData?.stats?.ai_dlp_monitoring?.confidential_count ?? 0}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400">Secret Assets:</span>
+                <span className="font-bold text-white">{dashboardData?.stats?.ai_dlp_monitoring?.secret_count ?? 0}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400">Contains PII / SSNs:</span>
+                <span className={`font-bold ${dashboardData?.stats?.ai_dlp_monitoring?.pii_count > 0 ? 'text-amber-400 font-extrabold' : 'text-gray-400'}`}>
+                  {dashboardData?.stats?.ai_dlp_monitoring?.pii_count ?? 0}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400">Contains Credentials:</span>
+                <span className={`font-bold ${dashboardData?.stats?.ai_dlp_monitoring?.credentials_count > 0 ? 'text-rose-400 font-extrabold animate-pulse' : 'text-gray-400'}`}>
+                  {dashboardData?.stats?.ai_dlp_monitoring?.credentials_count ?? 0}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400">Average Risk Score:</span>
+                <span className="font-bold text-white">{(dashboardData?.stats?.ai_dlp_monitoring?.avg_risk_score ?? 0).toFixed(2)}</span>
+              </div>
+            </div>
+          </GlassCard>
+
+          {/* Secure Sharing Monitoring */}
+          <GlassCard className="p-5 space-y-4" glow="cyan">
+            <h4 className="text-sm font-extrabold text-cyan-400 border-b border-gray-800 pb-2">Sharing Policy Audit</h4>
+            <div className="space-y-3 text-xs">
+              <div className="flex justify-between">
+                <span className="text-gray-400">Active Share Links:</span>
+                <span className="font-bold text-white">{dashboardData?.stats?.active_shares ?? 0}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400">Expired / Revoked Shares:</span>
+                <span className="font-bold text-gray-400">
+                  {(dashboardData?.stats?.expired_shares ?? 0) + (dashboardData?.stats?.revoked_shares ?? 0)}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400">Total File Downloads:</span>
+                <span className="font-bold text-white">{dashboardData?.stats?.total_downloads ?? 0}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400">Failed access tries:</span>
+                <span className={`font-bold ${dashboardData?.stats?.failed_share_access > 0 ? 'text-rose-450 font-extrabold animate-pulse' : 'text-gray-400'}`}>
+                  {dashboardData?.stats?.failed_share_access ?? 0}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400">Failed Login Attempts:</span>
+                <span className={`font-bold ${dashboardData?.stats?.failed_logins > 0 ? 'text-rose-450 animate-pulse' : 'text-gray-400'}`}>
+                  {dashboardData?.stats?.failed_logins ?? 0}
+                </span>
+              </div>
+            </div>
+          </GlassCard>
+        </div>
+      </div>
 
       {/* Visual Analytics Grid */}
       <div className="space-y-6">

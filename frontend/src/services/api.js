@@ -176,8 +176,8 @@ export const auditAPI = {
     const res = await apiClient.get('/dashboard');
     return res.data;
   },
-  getLogs: async (search = '', module = 'ALL', status = 'ALL', userId = 'ALL', action = 'ALL', startDate = '', endDate = '', page = 1, perPage = 20) => {
-    const res = await apiClient.get(`/logs?search=${encodeURIComponent(search)}&module=${module}&status=${status}&user_id=${userId}&action=${action}&start_date=${startDate}&end_date=${endDate}&page=${page}&per_page=${perPage}`);
+  getLogs: async (search = '', module = 'ALL', status = 'ALL', userId = 'ALL', action = 'ALL', startDate = '', endDate = '', page = 1, perPage = 20, severity = 'ALL') => {
+    const res = await apiClient.get(`/logs?search=${encodeURIComponent(search)}&module=${module}&status=${status}&user_id=${userId}&action=${action}&start_date=${startDate}&end_date=${endDate}&page=${page}&per_page=${perPage}&severity=${severity}`);
     return res.data;
   },
   getUsers: async () => {

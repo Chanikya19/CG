@@ -183,5 +183,138 @@ class TestCipherGuardDashboard(unittest.TestCase):
         self.assertEqual(sum(data["sharing_line"]["data"]), 1)
         self.assertEqual(sum(data["failed_logins_line"]["data"]), 1)
 
+    def test_dashboard_authentication_required(self):
+        # Missing header
+        res = self.client.get("/api/dashboard")
+        self.assertEqual(res.status_code, 401)
+        
+        # Invalid header
+        headers = {"Authorization": "Bearer invalidtoken123"}
+        res = self.client.get("/api/dashboard", headers=headers)
+        self.assertEqual(res.status_code, 401)
+
+    def test_unauthorized_dashboard_access_and_isolation(self):
+        # Create User B
+        user_b = User(
+            full_name="User B",
+            email="userb@cipherguard.test",
+            password_hash="fake-hash",
+            role="user",
+            status="active"
+        )
+        db.session.add(user_b)
+        db.session.commit()
+        
+        # Seed a file for User A
+        file_a = File(
+            filename="user_a_file.txt",
+            file_path="vault/checksum_a.enc",
+            mime_type="text/plain",
+            file_size=100,
+            checksum="checksum_a",
+            owner_id=self.user_a.id,
+            is_encrypted=True
+        )
+        db.session.add(file_a)
+        db.session.commit()
+        
+        # Query dashboard as User B
+        userb_token = encode_auth_token(user_b.id)
+        headers = {"Authorization": f"Bearer {userb_token}"}
+        res = self.client.get("/api/dashboard", headers=headers)
+        self.assertEqual(res.status_code, 200)
+        
+        data = json.loads(res.data)
+        stats = data.get("stats")
+        
+        # User B should see 0 secured files since they don't own User A's files
+        self.assertEqual(stats.get("secured_files"), 0)
+
+    def test_alert_resolution_and_unauthorized_resolve(self):
+        # Seed unresolved alert for User A
+        alert = SecurityAlert(
+            user_id=self.user_a.id,
+            alert_type="Unauthorized API access",
+            severity="HIGH",
+            message="Attempted to access admin list",
+            status="unresolved"
+        )
+        db.session.add(alert)
+        db.session.commit()
+        
+        # Try resolving as non-admin User A
+        headers_user = {"Authorization": f"Bearer {self.usera_token}"}
+        res = self.client.post(f"/api/admin/alerts/{alert.id}/resolve", headers=headers_user)
+        self.assertEqual(res.status_code, 403)
+        
+        # Resolve as Admin
+        admin_token = encode_auth_token(self.admin.id)
+        headers_admin = {"Authorization": f"Bearer {admin_token}"}
+        res = self.client.post(f"/api/admin/alerts/{alert.id}/resolve", headers=headers_admin)
+        self.assertEqual(res.status_code, 200)
+        
+        # Re-fetch alert to check resolved_at timestamp
+        alert_db = SecurityAlert.query.get(alert.id)
+        self.assertEqual(alert_db.status, "resolved")
+        self.assertIsNotNone(alert_db.resolved_at)
+
+    def test_audit_logs_filtering_and_pagination(self):
+        # Seed various audit logs for User A with mock severity in details
+        log_low = ActivityLog(
+            user_id=self.user_a.id,
+            action="FILE_DECRYPTED",
+            module="Cryptographic Vault",
+            ip_address="127.0.0.1",
+            details={"message": "Decryption success", "severity": "LOW"},
+            status="success"
+        )
+        log_critical = ActivityLog(
+            user_id=self.user_a.id,
+            action="SECURITY_ALERT",
+            module="General",
+            ip_address="127.0.0.1",
+            details={"message": "Tampering detected", "severity": "CRITICAL"},
+            status="failed"
+        )
+        db.session.add_all([log_low, log_critical])
+        db.session.commit()
+        
+        headers = {"Authorization": f"Bearer {self.usera_token}"}
+        
+        # Filter by severity = CRITICAL
+        res = self.client.get("/api/logs?severity=CRITICAL", headers=headers)
+        self.assertEqual(res.status_code, 200)
+        data = json.loads(res.data)
+        self.assertEqual(len(data["logs"]), 1)
+        self.assertEqual(data["logs"][0]["action"], "SECURITY_ALERT")
+        
+        # Pagination check
+        res = self.client.get("/api/logs?per_page=1&page=2", headers=headers)
+        self.assertEqual(res.status_code, 200)
+        data = json.loads(res.data)
+        self.assertEqual(len(data["logs"]), 1)
+        self.assertEqual(data["total"], 2)
+        self.assertEqual(data["pages"], 2)
+
+    def test_empty_database_state_graceful_handling(self):
+        # Clear database tables for isolated tests
+        db.session.query(File).delete()
+        db.session.query(FileSharing).delete()
+        db.session.query(ActivityLog).delete()
+        db.session.query(SecurityAlert).delete()
+        db.session.commit()
+        
+        headers = {"Authorization": f"Bearer {self.usera_token}"}
+        res = self.client.get("/api/dashboard", headers=headers)
+        self.assertEqual(res.status_code, 200)
+        
+        data = json.loads(res.data)
+        stats = data.get("stats")
+        
+        # Ensure clean defaults/zeros are returned
+        self.assertEqual(stats.get("secured_files"), 0)
+        self.assertEqual(stats.get("threat_score"), 0)
+        self.assertEqual(stats.get("security_score"), 100)
+
 if __name__ == '__main__':
     unittest.main()

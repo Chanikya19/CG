@@ -38,3 +38,7 @@ text,label
 "List of government tax IDs for executives: SSN 000-12-3456, Passport 883719A.",Secret
 "Confidential patent claims: This method encrypts file fragments dynamically using chaotic mapping.",Secret
 "Primary bank account routing details: Routing number 021000021, account number 449281723.",Secret
+"CipherGuard has published a comprehensive API reference guide detailing its public integration endpoints for open source compliance.",Public
+"Draft minutes from internal board meeting discussing Q4 corporate restructuring, proprietary strategy documents, and confidential salary ranges.",Confidential
+"Private asymmetric key credentials database backup log: SSH private key -----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ==\n-----END OPENSSH PRIVATE KEY-----",Secret
+

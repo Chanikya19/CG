@@ -341,5 +341,94 @@ class TestCipherGuardSharing(unittest.TestCase):
         self.assertIsNotNone(log)
         self.assertEqual(log.details["reason"], "Encrypted file payload missing from vault storage")
 
+    def test_sharing_token_not_logged_raw(self):
+        # Create share link
+        with self.app.test_request_context(
+            json={"file_id": self.test_file.id, "expiry_hours": 24, "max_downloads": 5},
+            environ_base={"REMOTE_ADDR": "127.0.0.1", "HTTP_USER_AGENT": "TestAgent"}
+        ):
+            response = share_file_endpoint(self.test_user)
+            self.assertEqual(response[1], 201)
+            data = response[0].get_json()
+            token = data["share_token"]
+            
+        # Verify FILE_SHARED log contains masked token instead of raw token
+        log_shared = ActivityLog.query.filter_by(action='FILE_SHARED').first()
+        self.assertIsNotNone(log_shared)
+        self.assertNotIn("token", log_shared.details)
+        self.assertIn("share_prefix", log_shared.details)
+        self.assertEqual(log_shared.details["share_prefix"], token[:8] + "...")
+
+        # Access share link
+        with self.app.test_request_context(
+            environ_base={"REMOTE_ADDR": "127.0.0.1", "HTTP_USER_AGENT": "TestAgent"}
+        ):
+            resolve_shared_link(token)
+            
+        # Verify SHARE_ACCESSED log contains masked token instead of raw token
+        log_accessed = ActivityLog.query.filter_by(action='SHARE_ACCESSED').first()
+        self.assertIsNotNone(log_accessed)
+        self.assertNotIn("token", log_accessed.details)
+        self.assertIn("share_prefix", log_accessed.details)
+        self.assertEqual(log_accessed.details["share_prefix"], token[:8] + "...")
+
+    def test_shared_file_tampering_detection(self):
+        # Create FileIntegrity entry for test_file
+        from app.models.models import FileIntegrity
+        with open(self.file_disk_path, 'rb') as f:
+            content_bytes = f.read()
+        original_hash = generate_sha256(content_bytes)
+        
+        integrity = FileIntegrity(file_id=self.test_file.id, sha256_hash=original_hash)
+        db.session.add(integrity)
+        db.session.commit()
+
+        # Create share link
+        share = FileSharing(
+            file_id=self.test_file.id,
+            owner_id=self.test_user.id,
+            share_token="tamper_check_token",
+            expiry_time=datetime.utcnow() + timedelta(hours=2),
+            status='active'
+        )
+        db.session.add(share)
+        db.session.commit()
+
+        # Resolve sharing link before tampering -> should be VERIFIED
+        with self.app.test_request_context(
+            environ_base={"REMOTE_ADDR": "127.0.0.1", "HTTP_USER_AGENT": "TestAgent"}
+        ):
+            res1 = resolve_shared_link("tamper_check_token")
+            self.assertEqual(res1[1], 200)
+            self.assertEqual(res1[0].get_json()["file"]["integrity_status"], "VERIFIED")
+
+        # Now, tamper with the file on disk
+        with open(self.file_disk_path, 'wb') as f:
+            f.write(b"TAMPERED_CIPHERTEXT_BYTES_HERE")
+
+        # Resolve sharing link after tampering -> status should be TAMPERED
+        with self.app.test_request_context(
+            environ_base={"REMOTE_ADDR": "127.0.0.1", "HTTP_USER_AGENT": "TestAgent"}
+        ):
+            res2 = resolve_shared_link("tamper_check_token")
+            self.assertEqual(res2[1], 200)
+            self.assertEqual(res2[0].get_json()["file"]["integrity_status"], "TAMPERED")
+
+        # Attempting to download/decrypt the tampered shared file should block with 400
+        with self.app.test_request_context(
+            environ_base={"REMOTE_ADDR": "127.0.0.1", "HTTP_USER_AGENT": "TestAgent"}
+        ):
+            res3 = download_shared_file("tamper_check_token")
+            self.assertEqual(res3[1], 400)
+            self.assertIn("integrity check failed", res3[0].get_json()["error"].lower())
+
+    def test_path_traversal_on_share_link_resolver(self):
+        # Passing relative path traversal token should fail cleanly with 404
+        with self.app.test_request_context(
+            environ_base={"REMOTE_ADDR": "127.0.0.1", "HTTP_USER_AGENT": "TestAgent"}
+        ):
+            res = resolve_shared_link("../../../etc/passwd")
+            self.assertEqual(res[1], 404)
+
 if __name__ == '__main__':
     unittest.main()

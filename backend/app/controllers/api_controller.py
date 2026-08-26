@@ -35,9 +35,18 @@ def register_user():
     if not re.match(email_regex, email):
         return jsonify({"error": "Invalid email format. Please provide a valid email address."}), 400
 
-    # Password strength validation (min 8 chars)
-    if len(password) < 8:
-        return jsonify({"error": "Password must be at least 8 characters long."}), 400
+    # Password strength validation (min 8 chars, mixture of character types)
+    if (len(password) < 8 or
+        not re.search(r'[A-Z]', password) or
+        not re.search(r'[a-z]', password) or
+        not re.search(r'[0-9]', password) or
+        not re.search(r'[^A-Za-z0-9]', password)):
+        return jsonify({"error": "Password must be at least 8 characters long and contain uppercase, lowercase, numbers, and special characters."}), 400
+
+    # Reject common/weak passphrases
+    common_passwords = ["password", "12345678", "password123", "admin123", "cipherguard", "passphrase"]
+    if password.lower() in common_passwords:
+        return jsonify({"error": "Password is too common or weak. Please choose a unique passphrase."}), 400
 
     if User.query.filter_by(email=email).first():
         return jsonify({"error": "Email identifier already registered"}), 409
@@ -99,39 +108,74 @@ def login_user():
 
     user = User.query.filter_by(email=email).first()
 
-    if user:
-        if user.lockout_until and user.lockout_until > datetime.utcnow():
-            return jsonify({"error": f"Account locked. Try again after {user.lockout_until.strftime('%Y-%m-%d %H:%M:%S')} UTC"}), 403
+    # Timing countermeasure: dummy salt hash match
+    dummy_hash = "$2b$12$e53j/E6L34yO1y8h7k7cOeP8R7Wb4S1e7N5w4E8R9T0Y1U2I3O4P5"
 
-    if not user or not bcrypt.checkpw(password.encode('utf-8'), user.password_hash.encode('utf-8')):
-        user_id = None
-        if user:
-            user_id = user.id
-            user.failed_login_attempts += 1
-            if user.failed_login_attempts >= 3:
-                user.lockout_until = datetime.utcnow() + timedelta(minutes=15)
-                trigger_security_alert(
-                    user_id=user.id,
-                    alert_type='Multiple failed login attempts',
-                    severity='HIGH',
-                    message=f"Operator account {user.email} locked due to 3 consecutive authentication failures."
-                )
-            db.session.commit()
-
+    if not user:
+        bcrypt.checkpw(b"dummy", dummy_hash.encode('utf-8'))
         log_event(
-            user_id=user_id,
+            user_id=None,
             action='LOGIN_FAILED',
             module='Authentication',
             file_name=None,
             ip_address=request.remote_addr,
             user_agent=request.headers.get('User-Agent', 'Unknown'),
-            details={"email": email, "message": "Failed login attempt (invalid credentials)."},
+            details={"email": email, "message": "Failed login attempt (user not found)."},
+            status='failed'
+        )
+        return jsonify({"error": "Invalid credentials"}), 401
+
+    if user.lockout_until and user.lockout_until > datetime.utcnow():
+        bcrypt.checkpw(b"dummy", dummy_hash.encode('utf-8'))
+        log_event(
+            user_id=user.id,
+            action='LOGIN_FAILED',
+            module='Authentication',
+            file_name=None,
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get('User-Agent', 'Unknown'),
+            details={"message": "Failed login attempt (account locked out)."},
             status='failed'
         )
         return jsonify({"error": "Invalid credentials"}), 401
 
     if user.status != 'active':
-        return jsonify({"error": "Account is suspended"}), 403
+        bcrypt.checkpw(b"dummy", dummy_hash.encode('utf-8'))
+        log_event(
+            user_id=user.id,
+            action='LOGIN_FAILED',
+            module='Authentication',
+            file_name=None,
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get('User-Agent', 'Unknown'),
+            details={"message": "Failed login attempt (user suspended)."},
+            status='failed'
+        )
+        return jsonify({"error": "Invalid credentials"}), 401
+
+    if not bcrypt.checkpw(password.encode('utf-8'), user.password_hash.encode('utf-8')):
+        user.failed_login_attempts += 1
+        if user.failed_login_attempts >= 3:
+            user.lockout_until = datetime.utcnow() + timedelta(minutes=15)
+            trigger_security_alert(
+                user_id=user.id,
+                alert_type='Multiple failed login attempts',
+                severity='HIGH',
+                message="Operator account locked due to 3 consecutive authentication failures."
+            )
+        db.session.commit()
+
+        log_event(
+            user_id=user.id,
+            action='LOGIN_FAILED',
+            module='Authentication',
+            file_name=None,
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get('User-Agent', 'Unknown'),
+            details={"message": "Failed login attempt (incorrect password)."},
+            status='failed'
+        )
+        return jsonify({"error": "Invalid credentials"}), 401
 
     # Reset attempts on success
     user.failed_login_attempts = 0
@@ -573,37 +617,112 @@ def share_file_key(current_user):
 # ==========================================
 
 def get_dashboard_summary(current_user):
-    # 1. Counts
+    is_admin = current_user.role == 'admin'
+
+    # 1. Total users
     total_users = User.query.count()
-    total_files = File.query.count()
-    total_encrypted = EncryptionKey.query.count()
-    total_shared = FileSharing.query.count()
-    
-    # Calculate verified and tampered files from latest IntegrityHistory for each file
+
+    # 2. File counts & encryption coverage
+    from sqlalchemy import func
+    if is_admin:
+        total_files = File.query.count()
+        total_encrypted = EncryptionKey.query.count()
+        total_shared = FileSharing.query.count()
+        
+        # DLP counts
+        pub_count = FileClassification.query.filter_by(classification_label='Public').count()
+        conf_count = FileClassification.query.filter_by(classification_label='Confidential').count()
+        sec_count = FileClassification.query.filter_by(classification_label='Secret').count()
+        
+        # High risk indicators
+        pii_count = FileClassification.query.filter_by(contains_pii=True).count()
+        cred_count = FileClassification.query.filter_by(contains_credentials=True).count()
+        ip_count = FileClassification.query.filter_by(contains_ip=True).count()
+        
+        # Average risk score
+        avg_risk = db.session.query(func.avg(FileClassification.dlp_risk_score)).scalar() or 0.0
+        avg_risk = float(avg_risk)
+        
+        # Sharing stats
+        active_shares = FileSharing.query.filter_by(status='active').count()
+        expired_shares = FileSharing.query.filter_by(status='expired').count()
+        revoked_shares = FileSharing.query.filter_by(status='revoked').count()
+        total_downloads = db.session.query(func.sum(FileSharing.downloads_count)).scalar() or 0
+        failed_share_access = ActivityLog.query.filter_by(action='SHARE_FAILED_ACCESS').count()
+        
+        # Failed logins
+        failed_logins = ActivityLog.query.filter_by(action='LOGIN_FAILED').count()
+        
+        # Security alerts
+        active_alerts_count = SecurityAlert.query.filter_by(status='unresolved').count()
+        total_alerts = SecurityAlert.query.count()
+        
+        # Encryption operations
+        successful_encryptions = ActivityLog.query.filter_by(action='FILE_ENCRYPTED', status='success').count()
+        failed_encryptions = ActivityLog.query.filter_by(action='FILE_ENCRYPTED', status='failed').count()
+        decryption_failures = ActivityLog.query.filter_by(action='FILE_DECRYPTED', status='failed').count()
+    else:
+        total_files = File.query.filter_by(owner_id=current_user.id).count()
+        total_encrypted = EncryptionKey.query.join(File).filter(File.owner_id == current_user.id).count()
+        total_shared = FileSharing.query.filter_by(owner_id=current_user.id).count()
+        
+        # DLP counts
+        pub_count = FileClassification.query.join(File).filter(File.owner_id == current_user.id, FileClassification.classification_label == 'Public').count()
+        conf_count = FileClassification.query.join(File).filter(File.owner_id == current_user.id, FileClassification.classification_label == 'Confidential').count()
+        sec_count = FileClassification.query.join(File).filter(File.owner_id == current_user.id, FileClassification.classification_label == 'Secret').count()
+        
+        # High risk indicators
+        pii_count = FileClassification.query.join(File).filter(File.owner_id == current_user.id, FileClassification.contains_pii==True).count()
+        cred_count = FileClassification.query.join(File).filter(File.owner_id == current_user.id, FileClassification.contains_credentials==True).count()
+        ip_count = FileClassification.query.join(File).filter(File.owner_id == current_user.id, FileClassification.contains_ip==True).count()
+        
+        # Average risk score
+        classifications = FileClassification.query.join(File).filter(File.owner_id == current_user.id).all()
+        avg_risk = float(sum(c.dlp_risk_score for c in classifications) / len(classifications)) if classifications else 0.0
+        
+        # Sharing stats
+        active_shares = FileSharing.query.filter_by(owner_id=current_user.id, status='active').count()
+        expired_shares = FileSharing.query.filter_by(owner_id=current_user.id, status='expired').count()
+        revoked_shares = FileSharing.query.filter_by(owner_id=current_user.id, status='revoked').count()
+        total_downloads = db.session.query(func.sum(FileSharing.downloads_count)).filter(FileSharing.owner_id == current_user.id).scalar() or 0
+        failed_share_access = ActivityLog.query.filter_by(action='SHARE_FAILED_ACCESS', user_id=current_user.id).count()
+        
+        # Failed logins
+        failed_logins = ActivityLog.query.filter_by(action='LOGIN_FAILED', user_id=current_user.id).count()
+        
+        # Security alerts
+        active_alerts_count = SecurityAlert.query.filter_by(status='unresolved', user_id=current_user.id).count()
+        total_alerts = SecurityAlert.query.filter_by(user_id=current_user.id).count()
+        
+        # Encryption operations
+        successful_encryptions = ActivityLog.query.filter_by(action='FILE_ENCRYPTED', status='success', user_id=current_user.id).count()
+        failed_encryptions = ActivityLog.query.filter_by(action='FILE_ENCRYPTED', status='failed', user_id=current_user.id).count()
+        decryption_failures = ActivityLog.query.filter_by(action='FILE_DECRYPTED', status='failed', user_id=current_user.id).count()
+
+    # Calculate verified and tampered files
     latest_status = {}
-    for h in IntegrityHistory.query.order_by(IntegrityHistory.timestamp.asc()).all():
+    if is_admin:
+        history_query = IntegrityHistory.query
+    else:
+        history_query = IntegrityHistory.query.filter_by(user_id=current_user.id)
+        
+    for h in history_query.order_by(IntegrityHistory.timestamp.asc()).all():
         latest_status[h.file_id] = h.result
 
     verified_files = sum(1 for status in latest_status.values() if status == 'VERIFIED')
     tampered_files = sum(1 for status in latest_status.values() if status == 'TAMPERED')
-    
-    # Active security alerts count (unresolved alerts from SecurityAlert model)
-    active_alerts_count = SecurityAlert.query.filter_by(status='unresolved').count()
-    
-    # Calculate average compliance
-    classifications = FileClassification.query.join(File).filter(File.owner_id == current_user.id).all()
-    avg_risk = float(sum(c.dlp_risk_score for c in classifications) / len(classifications)) if classifications else 0.0
 
-    # Calculate counts by classification label for secured files
-    pub_count = FileClassification.query.join(File).filter(File.owner_id == current_user.id, FileClassification.classification_label == 'Public').count()
-    conf_count = FileClassification.query.join(File).filter(File.owner_id == current_user.id, FileClassification.classification_label == 'Confidential').count()
-    sec_count = FileClassification.query.join(File).filter(File.owner_id == current_user.id, FileClassification.classification_label == 'Secret').count()
-
-    # Calculate Security Score components
-    critical_alerts = SecurityAlert.query.filter_by(status='unresolved', severity='CRITICAL').count()
-    high_alerts = SecurityAlert.query.filter_by(status='unresolved', severity='HIGH').count()
-    medium_alerts = SecurityAlert.query.filter_by(status='unresolved', severity='MEDIUM').count()
-    low_alerts = SecurityAlert.query.filter_by(status='unresolved', severity='LOW').count()
+    # Security alerts deductions
+    if is_admin:
+        critical_alerts = SecurityAlert.query.filter_by(status='unresolved', severity='CRITICAL').count()
+        high_alerts = SecurityAlert.query.filter_by(status='unresolved', severity='HIGH').count()
+        medium_alerts = SecurityAlert.query.filter_by(status='unresolved', severity='MEDIUM').count()
+        low_alerts = SecurityAlert.query.filter_by(status='unresolved', severity='LOW').count()
+    else:
+        critical_alerts = SecurityAlert.query.filter_by(status='unresolved', severity='CRITICAL', user_id=current_user.id).count()
+        high_alerts = SecurityAlert.query.filter_by(status='unresolved', severity='HIGH', user_id=current_user.id).count()
+        medium_alerts = SecurityAlert.query.filter_by(status='unresolved', severity='MEDIUM', user_id=current_user.id).count()
+        low_alerts = SecurityAlert.query.filter_by(status='unresolved', severity='LOW', user_id=current_user.id).count()
 
     alerts_deduction = min(40, (critical_alerts * 20) + (high_alerts * 10) + (medium_alerts * 5) + (low_alerts * 2))
     tamper_deduction = min(40, tampered_files * 15)
@@ -611,45 +730,56 @@ def get_dashboard_summary(current_user):
     enc_coverage_pct = (total_encrypted / total_files * 100) if total_files > 0 else 100.0
     enc_deduction = min(10, (1 - (total_encrypted / total_files)) * 10) if total_files > 0 else 0.0
 
-    sig_count = FileIntegrity.query.count()
+    if is_admin:
+        sig_count = FileIntegrity.query.count()
+    else:
+        sig_count = FileIntegrity.query.join(File).filter(File.owner_id == current_user.id).count()
+        
     sig_coverage_pct = (sig_count / total_files * 100) if total_files > 0 else 100.0
     sig_deduction = min(10, (1 - (sig_count / total_files)) * 10) if total_files > 0 else 0.0
 
-    security_score = max(0, int(100 - alerts_deduction - tamper_deduction - enc_deduction - sig_deduction))
+    # Threat Score: Explainable, consistent threat score mapping directly to database metrics.
+    threat_score = min(100, int(alerts_deduction + tamper_deduction + enc_deduction + sig_deduction))
+
+    # Security Score (legacy)
+    security_score = max(0, 100 - threat_score)
 
     security_factors = [
         {
             "name": "Security Alerts",
             "status": "Good" if alerts_deduction == 0 else "Action Required",
             "deduction": int(alerts_deduction),
-            "description": f"Deducted {int(alerts_deduction)} pts for {critical_alerts + high_alerts + medium_alerts + low_alerts} unresolved alert(s)."
+            "contribution": int(alerts_deduction),
+            "description": f"Added {int(alerts_deduction)} to threat score for {critical_alerts + high_alerts + medium_alerts + low_alerts} unresolved alert(s)."
         },
         {
             "name": "File Tampering",
             "status": "Good" if tamper_deduction == 0 else "Danger",
             "deduction": int(tamper_deduction),
-            "description": f"Deducted {int(tamper_deduction)} pts for {tampered_files} tampered file(s) detected."
+            "contribution": int(tamper_deduction),
+            "description": f"Added {int(tamper_deduction)} to threat score for {tampered_files} tampered file(s) detected."
         },
         {
             "name": "Encryption Coverage",
             "status": "Good" if enc_coverage_pct >= 90 else "Improvement Needed",
             "deduction": int(enc_deduction),
-            "description": f"Deducted {int(enc_deduction)} pts. Current coverage is {round(enc_coverage_pct, 1)}%."
+            "contribution": int(enc_deduction),
+            "description": f"Added {int(enc_deduction)} to threat score. Current coverage is {round(enc_coverage_pct, 1)}%."
         },
         {
             "name": "Integrity Signatures",
             "status": "Good" if sig_coverage_pct >= 90 else "Improvement Needed",
             "deduction": int(sig_deduction),
-            "description": f"Deducted {int(sig_deduction)} pts. Current signature coverage is {round(sig_coverage_pct, 1)}%."
+            "contribution": int(sig_deduction),
+            "description": f"Added {int(sig_deduction)} to threat score. Current signature coverage is {round(sig_coverage_pct, 1)}%."
         }
     ]
 
-    # 2. Recent Files
+    # Recent files
     files = File.query.filter_by(owner_id=current_user.id).order_by(File.created_at.desc()).limit(5).all()
     files_list = []
     for f in files:
         cls_label = f.classification.classification_label if f.classification else 'Confidential'
-        # Query encryption key metadata
         enc_key = EncryptionKey.query.filter_by(file_id=f.id).first()
         algorithm = enc_key.key_type if enc_key else 'AES-256-GCM'
         key_size = 256
@@ -669,7 +799,7 @@ def get_dashboard_summary(current_user):
             "encryption_time_ms": enc_time
         })
 
-    # 3. Most Recent Active Share Link Details
+    # Most Recent Active Share
     recent_share = FileSharing.query.filter_by(owner_id=current_user.id, status='active').order_by(FileSharing.created_at.desc()).first()
     share_details = None
     if recent_share and recent_share.expiry_time > datetime.utcnow():
@@ -683,7 +813,6 @@ def get_dashboard_summary(current_user):
             "expiry_time": recent_share.expiry_time.strftime('%Y-%m-%d %H:%M:%S'),
             "integrity_status": "VERIFIED"
         }
-        # Live audit status check
         vault_dir = os.path.join(current_app.instance_path, 'vault')
         file_path = os.path.join(vault_dir, f"{recent_share.file.checksum}.enc") if recent_share.file else ""
         if file_path and os.path.exists(file_path) and integrity:
@@ -702,9 +831,43 @@ def get_dashboard_summary(current_user):
             "verified_files": verified_files,
             "tampered_files": tampered_files,
             "security_alerts": active_alerts_count,
+            "total_alerts": total_alerts,
             "vulnerability_index": f"{round(avg_risk / 10, 2)} / 10",
             "security_score": security_score,
-            "security_factors": security_factors
+            "security_factors": security_factors,
+            "threat_score": threat_score,
+            "threat_factors": security_factors,
+            "avg_compliance_risk": avg_risk,
+            
+            # Module 5 detailed statistics
+            "sensitive_files": pub_count + conf_count + sec_count,
+            "active_shares": active_shares,
+            "expired_shares": expired_shares,
+            "revoked_shares": revoked_shares,
+            "total_downloads": total_downloads,
+            "failed_share_access": failed_share_access,
+            "failed_logins": failed_logins,
+            
+            "encryption_monitoring": {
+                "aes256_count": EncryptionKey.query.join(File).filter(File.owner_id == current_user.id).filter(EncryptionKey.key_type.like('%AES-256%')).count() if not is_admin else EncryptionKey.query.filter(EncryptionKey.key_type.like('%AES-256%')).count(),
+                "aes128_count": EncryptionKey.query.join(File).filter(File.owner_id == current_user.id).filter(EncryptionKey.key_type.like('%AES-128%')).count() if not is_admin else EncryptionKey.query.filter(EncryptionKey.key_type.like('%AES-128%')).count(),
+                "versions": {
+                    "v1": EncryptionKey.query.join(File).filter(File.owner_id == current_user.id).filter(EncryptionKey.version == 1).count() if not is_admin else EncryptionKey.query.filter_by(version=1).count(),
+                    "v2": EncryptionKey.query.join(File).filter(File.owner_id == current_user.id).filter(EncryptionKey.version == 2).count() if not is_admin else EncryptionKey.query.filter_by(version=2).count()
+                },
+                "successful_encryptions": successful_encryptions,
+                "failed_encryptions": failed_encryptions,
+                "decryption_failures": decryption_failures
+            },
+            "ai_dlp_monitoring": {
+                "public_count": pub_count,
+                "confidential_count": conf_count,
+                "secret_count": sec_count,
+                "pii_count": pii_count,
+                "credentials_count": cred_count,
+                "ip_count": ip_count,
+                "avg_risk_score": avg_risk
+            }
         },
         "recent_files": files_list,
         "classification_distribution": {
@@ -754,6 +917,11 @@ def get_activity_logs(current_user):
     # Filter by Action
     if action_param != 'ALL':
         query = query.filter_by(action=action_param)
+
+    # Filter by Severity
+    severity = request.args.get('severity', 'ALL')
+    if severity != 'ALL':
+        query = query.filter(ActivityLog.details.like(f'%"severity": "{severity}"%'))
 
     # Filter by Date Range
     if start_date_str:
@@ -987,6 +1155,31 @@ def download_file_decrypted(current_user, file_id):
     try:
         with open(file_path, 'rb') as f:
             ciphertext_bytes = f.read()
+
+        # Enforce file integrity checks before decryption
+        integrity = FileIntegrity.query.filter_by(file_id=file.id).first()
+        if integrity:
+            from app.utils.integrity import verify_sha256
+            if not verify_sha256(ciphertext_bytes, integrity.sha256_hash):
+                trigger_security_alert(
+                    user_id=current_user.id,
+                    alert_type='File tampering detected',
+                    severity='CRITICAL',
+                    message=f"Decryption blocked: Integrity check failed for file {file.filename} (ID {file.id}) due to ciphertext signature mismatch.",
+                    file_id=file.id
+                )
+                log_event(
+                    user_id=current_user.id,
+                    action='FILE_TAMPERED',
+                    module='Cryptographic Vault',
+                    file_name=file.filename,
+                    file_id=file.id,
+                    ip_address=request.remote_addr,
+                    user_agent=request.user_agent.string,
+                    details={"filename": file.filename, "error": "Integrity signature mismatch. Decryption blocked."},
+                    status='failed'
+                )
+                return jsonify({"error": "Decryption blocked: The encrypted file payload has been tampered with or is corrupted."}), 400
 
         decrypted_bytes = decrypt_by_sensitivity(
             ciphertext_bytes=ciphertext_bytes,
@@ -1371,7 +1564,7 @@ def share_file_endpoint(current_user):
             user_agent=request.user_agent.string,
             details={
                 "filename": file.filename, 
-                "token": token, 
+                "share_prefix": token[:8] + "...", 
                 "expiry_hours": expiry_hours, 
                 "max_downloads": max_downloads
             },
@@ -1392,7 +1585,7 @@ def share_file_endpoint(current_user):
         return jsonify({"error": f"Failed to generate share link: {str(e)}"}), 500
 
 def resolve_shared_link(token):
-    share = FileSharing.query.filter_by(share_token=token).first()
+    share = FileSharing.query.filter_by(share_token=token).with_for_update().first()
     if not share:
         # Log failed access
         log_event(
@@ -1401,7 +1594,7 @@ def resolve_shared_link(token):
             module='Delegated Sharing',
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
-            details={"token": token, "reason": "Sharing link is invalid or not found"},
+            details={"share_prefix": token[:8] + "..." if token else None, "reason": "Sharing link is invalid or not found"},
             status='failed'
         )
         return jsonify({"error": "Sharing link is invalid or not found"}), 404
@@ -1413,7 +1606,7 @@ def resolve_shared_link(token):
             user_id=share.owner_id,
             alert_type='Expired share link access',
             severity='MEDIUM',
-            message=f"Access attempt blocked on share token {token} because download limit ({share.max_downloads}) was exceeded.",
+            message=f"Access attempt blocked on share token {token[:8]}... because download limit ({share.max_downloads}) was exceeded.",
             file_id=share.file_id
         )
         log_event(
@@ -1424,7 +1617,7 @@ def resolve_shared_link(token):
             file_name=share.file.filename if share.file else None,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
-            details={"token": token, "reason": "Download limit has been exceeded"},
+            details={"share_prefix": token[:8] + "..." if token else None, "reason": "Download limit has been exceeded"},
             status='failed'
         )
         return jsonify({"error": "This sharing link has exceeded its download limit"}), 403
@@ -1436,7 +1629,7 @@ def resolve_shared_link(token):
             user_id=share.owner_id,
             alert_type=alert_type,
             severity='MEDIUM',
-            message=f"Access attempt blocked on share token {token} because token status is {share.status}.",
+            message=f"Access attempt blocked on share token {token[:8]}... because token status is {share.status}.",
             file_id=share.file_id
         )
         log_event(
@@ -1447,7 +1640,7 @@ def resolve_shared_link(token):
             file_name=share.file.filename if share.file else None,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
-            details={"token": token, "reason": f"This sharing link has been {share.status}"},
+            details={"share_prefix": token[:8] + "..." if token else None, "reason": f"This sharing link has been {share.status}"},
             status='failed'
         )
         return jsonify({"error": f"This sharing link has been {share.status}"}), 403
@@ -1459,7 +1652,7 @@ def resolve_shared_link(token):
             user_id=share.owner_id,
             alert_type='Expired share link access',
             severity='MEDIUM',
-            message=f"Access attempt blocked on share token {token} because token expired on {share.expiry_time}.",
+            message=f"Access attempt blocked on share token {token[:8]}... because token expired on {share.expiry_time}.",
             file_id=share.file_id
         )
         log_event(
@@ -1470,7 +1663,7 @@ def resolve_shared_link(token):
             file_name=share.file.filename if share.file else None,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
-            details={"token": token, "reason": "This sharing link has expired"},
+            details={"share_prefix": token[:8] + "..." if token else None, "reason": "This sharing link has expired"},
             status='failed'
         )
         return jsonify({"error": "This sharing link has expired"}), 403
@@ -1484,7 +1677,7 @@ def resolve_shared_link(token):
             file_id=share.file_id,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
-            details={"token": token, "reason": "Shared file metadata no longer exists"},
+            details={"share_prefix": token[:8] + "..." if token else None, "reason": "Shared file metadata no longer exists"},
             status='failed'
         )
         return jsonify({"error": "Shared file metadata no longer exists"}), 404
@@ -1509,7 +1702,7 @@ def resolve_shared_link(token):
             file_name=file.filename,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
-            details={"token": token, "reason": "Encrypted file payload missing from vault storage"},
+            details={"share_prefix": token[:8] + "..." if token else None, "reason": "Encrypted file payload missing from vault storage"},
             status='failed'
         )
         return jsonify({"error": "Encrypted file payload missing from vault storage"}), 404
@@ -1542,7 +1735,7 @@ def resolve_shared_link(token):
             file_name=file.filename,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
-            details={"token": token, "filename": file.filename},
+            details={"share_prefix": token[:8] + "..." if token else None, "filename": file.filename},
             status='success'
         )
 
@@ -1565,7 +1758,7 @@ def resolve_shared_link(token):
         return jsonify({"error": f"Failed to resolve shared link: {str(e)}"}), 500
 
 def download_shared_file(token):
-    share = FileSharing.query.filter_by(share_token=token).first()
+    share = FileSharing.query.filter_by(share_token=token).with_for_update().first()
     if not share:
         log_event(
             user_id=None,
@@ -1573,7 +1766,7 @@ def download_shared_file(token):
             module='Delegated Sharing',
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
-            details={"token": token, "reason": "Sharing link is invalid or not found"},
+            details={"share_prefix": token[:8] + "..." if token else None, "reason": "Sharing link is invalid or not found"},
             status='failed'
         )
         return jsonify({"error": "Sharing link is invalid or not found"}), 404
@@ -1585,7 +1778,7 @@ def download_shared_file(token):
             user_id=share.owner_id,
             alert_type='Expired share link access',
             severity='MEDIUM',
-            message=f"Access attempt blocked on share token {token} because download limit ({share.max_downloads}) was exceeded.",
+            message=f"Access attempt blocked on share token {token[:8]}... because download limit ({share.max_downloads}) was exceeded.",
             file_id=share.file_id
         )
         log_event(
@@ -1596,7 +1789,7 @@ def download_shared_file(token):
             file_name=share.file.filename if share.file else None,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
-            details={"token": token, "reason": "Download limit has been exceeded"},
+            details={"share_prefix": token[:8] + "..." if token else None, "reason": "Download limit has been exceeded"},
             status='failed'
         )
         return jsonify({"error": "This sharing link has exceeded its download limit"}), 403
@@ -1607,7 +1800,7 @@ def download_shared_file(token):
             user_id=share.owner_id,
             alert_type=alert_type,
             severity='MEDIUM',
-            message=f"Access attempt blocked on share token {token} because token status is {share.status}.",
+            message=f"Access attempt blocked on share token {token[:8]}... because token status is {share.status}.",
             file_id=share.file_id
         )
         log_event(
@@ -1618,7 +1811,7 @@ def download_shared_file(token):
             file_name=share.file.filename if share.file else None,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
-            details={"token": token, "reason": f"This sharing link has been {share.status}"},
+            details={"share_prefix": token[:8] + "..." if token else None, "reason": f"This sharing link has been {share.status}"},
             status='failed'
         )
         return jsonify({"error": f"This sharing link has been {share.status}"}), 403
@@ -1630,7 +1823,7 @@ def download_shared_file(token):
             user_id=share.owner_id,
             alert_type='Expired share link access',
             severity='MEDIUM',
-            message=f"Access attempt blocked on share token {token} because token expired on {share.expiry_time}.",
+            message=f"Access attempt blocked on share token {token[:8]}... because token expired on {share.expiry_time}.",
             file_id=share.file_id
         )
         log_event(
@@ -1641,7 +1834,7 @@ def download_shared_file(token):
             file_name=share.file.filename if share.file else None,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
-            details={"token": token, "reason": "This sharing link has expired"},
+            details={"share_prefix": token[:8] + "..." if token else None, "reason": "This sharing link has expired"},
             status='failed'
         )
         return jsonify({"error": "This sharing link has expired"}), 403
@@ -1655,7 +1848,7 @@ def download_shared_file(token):
             file_id=share.file_id,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
-            details={"token": token, "reason": "Shared file metadata no longer exists"},
+            details={"share_prefix": token[:8] + "..." if token else None, "reason": "Shared file metadata no longer exists"},
             status='failed'
         )
         return jsonify({"error": "Shared file metadata no longer exists"}), 404
@@ -1679,7 +1872,7 @@ def download_shared_file(token):
                 file_name=file.filename,
                 ip_address=request.remote_addr,
                 user_agent=request.user_agent.string,
-                details={"token": token, "reason": "Private decryption key is required to decrypt this Secret file"},
+                details={"share_prefix": token[:8] + "..." if token else None, "reason": "Private decryption key is required to decrypt this Secret file"},
                 status='failed'
             )
             return jsonify({"error": "Private decryption key is required to decrypt this Secret file"}), 400
@@ -1699,7 +1892,7 @@ def download_shared_file(token):
             file_name=file.filename,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
-            details={"token": token, "reason": "Encrypted file payload missing from vault"},
+            details={"share_prefix": token[:8] + "..." if token else None, "reason": "Encrypted file payload missing from vault"},
             status='failed'
         )
         return jsonify({"error": "Encrypted file payload missing from vault"}), 404
@@ -1721,7 +1914,7 @@ def download_shared_file(token):
                     file_name=file.filename,
                     ip_address=request.remote_addr,
                     user_agent=request.user_agent.string,
-                    details={"filename": file.filename, "token": token, "reason": "Security Block: File integrity check failed. Document has been tampered with!"},
+                    details={"filename": file.filename, "share_prefix": token[:8] + "...", "reason": "Security Block: File integrity check failed. Document has been tampered with!"},
                     status='failed'
                 )
                 return jsonify({"error": "Security Block: File integrity check failed. Document has been tampered with!"}), 400
@@ -1749,7 +1942,7 @@ def download_shared_file(token):
                 file_name=file.filename,
                 ip_address=request.remote_addr,
                 user_agent=request.user_agent.string,
-                details={"filename": file.filename, "token": token, "reason": "Download limit reached"},
+                details={"filename": file.filename, "share_prefix": token[:8] + "...", "reason": "Download limit reached"},
                 status='success'
             )
         db.session.commit()
@@ -1762,7 +1955,7 @@ def download_shared_file(token):
             file_name=file.filename,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
-            details={"filename": file.filename, "token": token, "downloads_count": share.downloads_count},
+            details={"filename": file.filename, "share_prefix": token[:8] + "...", "downloads_count": share.downloads_count},
             status='success'
         )
 
@@ -1781,7 +1974,7 @@ def download_shared_file(token):
             file_name=share.file.filename if share.file else None,
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string,
-            details={"token": token, "reason": f"Decryption failed: {str(e)}"},
+            details={"share_prefix": token[:8] + "..." if token else None, "reason": f"Decryption failed: {str(e)}"},
             status='failed'
         )
         return jsonify({"error": "Decryption failed. Invalid keys, corrupted payload, or authentication failure."}), 400
@@ -1875,28 +2068,47 @@ def get_security_alerts_endpoint(current_user):
             "status": 'active' if a.status == 'unresolved' else 'resolved',
             "timestamp": a.created_at.strftime('%Y-%m-%d %H:%M:%S'),
             "ip_address": a.ip_address or '0.0.0.0',
-            "created_at": a.created_at.strftime('%Y-%m-%d %H:%M:%S')
+            "created_at": a.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+            "resolved_at": a.resolved_at.strftime('%Y-%m-%d %H:%M:%S') if a.resolved_at else None
         })
         
     return jsonify(alerts_data), 200
 
 def get_statistics_endpoint(current_user):
+    is_admin = current_user.role == 'admin'
+
     # 1. Classification distribution
-    pub_count = FileClassification.query.filter_by(classification_label='Public').count()
-    conf_count = FileClassification.query.filter_by(classification_label='Confidential').count()
-    sec_count = FileClassification.query.filter_by(classification_label='Secret').count()
+    if is_admin:
+        pub_count = FileClassification.query.filter_by(classification_label='Public').count()
+        conf_count = FileClassification.query.filter_by(classification_label='Confidential').count()
+        sec_count = FileClassification.query.filter_by(classification_label='Secret').count()
+    else:
+        pub_count = FileClassification.query.join(File).filter(File.owner_id == current_user.id, FileClassification.classification_label == 'Public').count()
+        conf_count = FileClassification.query.join(File).filter(File.owner_id == current_user.id, FileClassification.classification_label == 'Confidential').count()
+        sec_count = FileClassification.query.join(File).filter(File.owner_id == current_user.id, FileClassification.classification_label == 'Secret').count()
 
     # 2. Key algorithms distribution
-    aes128_count = EncryptionKey.query.filter(EncryptionKey.key_type.like('%AES-128%')).count()
-    aes256_count = EncryptionKey.query.filter(EncryptionKey.key_type.like('%AES-256%')).count()
-    hybrid_count = EncryptionKey.query.filter(EncryptionKey.key_type.like('%Hybrid%')).count()
+    if is_admin:
+        aes128_count = EncryptionKey.query.filter(EncryptionKey.key_type.like('%AES-128%')).count()
+        aes256_count = EncryptionKey.query.filter(EncryptionKey.key_type.like('%AES-256%')).count()
+        hybrid_count = EncryptionKey.query.filter(EncryptionKey.key_type.like('%Hybrid%')).count()
+    else:
+        aes128_count = EncryptionKey.query.join(File).filter(File.owner_id == current_user.id, EncryptionKey.key_type.like('%AES-128%')).count()
+        aes256_count = EncryptionKey.query.join(File).filter(File.owner_id == current_user.id, EncryptionKey.key_type.like('%AES-256%')).count()
+        hybrid_count = EncryptionKey.query.join(File).filter(File.owner_id == current_user.id, EncryptionKey.key_type.like('%Hybrid%')).count()
 
     # 3. Daily File Uploads (past 7 days)
     from sqlalchemy import func
-    upload_stats = db.session.query(
-        func.date(File.created_at).label('upload_date'),
-        func.count(File.id).label('file_count')
-    ).group_by(func.date(File.created_at)).order_by(func.date(File.created_at).desc()).limit(7).all()
+    if is_admin:
+        upload_stats = db.session.query(
+            func.date(File.created_at).label('upload_date'),
+            func.count(File.id).label('file_count')
+        ).group_by(func.date(File.created_at)).order_by(func.date(File.created_at).desc()).limit(7).all()
+    else:
+        upload_stats = db.session.query(
+            func.date(File.created_at).label('upload_date'),
+            func.count(File.id).label('file_count')
+        ).filter(File.owner_id == current_user.id).group_by(func.date(File.created_at)).order_by(func.date(File.created_at).desc()).limit(7).all()
     
     daily_uploads = {}
     for i in range(7):
@@ -1915,7 +2127,11 @@ def get_statistics_endpoint(current_user):
     verified_count = 0
     tampered_count = 0
     
-    integrities = FileIntegrity.query.all()
+    if is_admin:
+        integrities = FileIntegrity.query.all()
+    else:
+        integrities = FileIntegrity.query.join(File).filter(File.owner_id == current_user.id).all()
+        
     vault_dir = os.path.join(current_app.instance_path, 'vault')
     for item in integrities:
         file = item.file
@@ -1933,10 +2149,16 @@ def get_statistics_endpoint(current_user):
                 tampered_count += 1
                 
     # 5. Sharing activity (FILE_SHARED or SHARE_ACCESSED events over past 7 days)
-    share_stats = db.session.query(
-        func.date(ActivityLog.timestamp).label('share_date'),
-        func.count(ActivityLog.id).label('share_count')
-    ).filter(ActivityLog.action.in_(['FILE_SHARED', 'SHARE_ACCESSED'])).group_by(func.date(ActivityLog.timestamp)).order_by(func.date(ActivityLog.timestamp).desc()).limit(7).all()
+    if is_admin:
+        share_stats = db.session.query(
+            func.date(ActivityLog.timestamp).label('share_date'),
+            func.count(ActivityLog.id).label('share_count')
+        ).filter(ActivityLog.action.in_(['FILE_SHARED', 'SHARE_ACCESSED'])).group_by(func.date(ActivityLog.timestamp)).order_by(func.date(ActivityLog.timestamp).desc()).limit(7).all()
+    else:
+        share_stats = db.session.query(
+            func.date(ActivityLog.timestamp).label('share_date'),
+            func.count(ActivityLog.id).label('share_count')
+        ).filter(ActivityLog.user_id == current_user.id).filter(ActivityLog.action.in_(['FILE_SHARED', 'SHARE_ACCESSED'])).group_by(func.date(ActivityLog.timestamp)).order_by(func.date(ActivityLog.timestamp).desc()).limit(7).all()
     
     daily_shares = {day: 0 for day in sorted_days}
     for stat in share_stats:
@@ -1947,10 +2169,16 @@ def get_statistics_endpoint(current_user):
     share_trend = [daily_shares[day] for day in sorted_days]
 
     # 6. Failed login attempts (LOGIN_FAILED events over past 7 days)
-    login_fail_stats = db.session.query(
-        func.date(ActivityLog.timestamp).label('fail_date'),
-        func.count(ActivityLog.id).label('fail_count')
-    ).filter(ActivityLog.action == 'LOGIN_FAILED').group_by(func.date(ActivityLog.timestamp)).order_by(func.date(ActivityLog.timestamp).desc()).limit(7).all()
+    if is_admin:
+        login_fail_stats = db.session.query(
+            func.date(ActivityLog.timestamp).label('fail_date'),
+            func.count(ActivityLog.id).label('fail_count')
+        ).filter(ActivityLog.action == 'LOGIN_FAILED').group_by(func.date(ActivityLog.timestamp)).order_by(func.date(ActivityLog.timestamp).desc()).limit(7).all()
+    else:
+        login_fail_stats = db.session.query(
+            func.date(ActivityLog.timestamp).label('fail_date'),
+            func.count(ActivityLog.id).label('fail_count')
+        ).filter(ActivityLog.user_id == current_user.id).filter(ActivityLog.action == 'LOGIN_FAILED').group_by(func.date(ActivityLog.timestamp)).order_by(func.date(ActivityLog.timestamp).desc()).limit(7).all()
     
     daily_login_fails = {day: 0 for day in sorted_days}
     for stat in login_fail_stats:
@@ -2112,6 +2340,7 @@ def resolve_security_alert_endpoint(current_user, alert_id):
         return jsonify({"error": "Alert not found"}), 404
 
     alert.status = 'resolved'
+    alert.resolved_at = datetime.utcnow()
     db.session.commit()
 
     log_event(
@@ -2128,7 +2357,8 @@ def resolve_security_alert_endpoint(current_user, alert_id):
         "message": "Alert marked as resolved successfully",
         "alert": {
             "id": alert.id,
-            "status": "resolved"
+            "status": "resolved",
+            "resolved_at": alert.resolved_at.strftime('%Y-%m-%d %H:%M:%S')
         }
     }), 200
 

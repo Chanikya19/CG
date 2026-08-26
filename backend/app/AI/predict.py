@@ -25,18 +25,25 @@ def detect_security_indicators(text):
     # Financial information patterns
     financial_patterns = [
         r'\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b',  # Credit card format
-        r'(?i)\b(credit\s*card|bank\s*statement|transaction\s*record|financial\s*report|invoice\s*summary)\b'
+        r'(?i)\b(credit\s*card|bank\s*statement|transaction\s*record|financial\s*report|invoice\s*summary|wire\s*transfer|billing\s*statement)\b'
     ]
     for pattern in financial_patterns:
         if re.search(pattern, text):
             detected.append("Financial information")
             break
             
+    # Email addresses
+    if re.search(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b', text):
+        detected.append("Email addresses")
+
+    # Phone numbers
+    if re.search(r'\b(?:\+?\d{1,3}[- ]?)?\(?\d{3}\)?[- ]?\d{3}[- ]?\d{4}\b', text):
+        detected.append("Phone numbers")
+
     # Personal information patterns
     personal_patterns = [
         r'\b\d{3}-\d{2}-\d{4}\b',  # SSN
-        r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b',  # Email address
-        r'(?i)\b(personally\s*identifiable|date\s*of\s*birth|\bdob\b|medical\s*record|passport\s*number)\b'
+        r'(?i)\b(personally\s*identifiable|date\s*of\s*birth|\bdob\b|medical\s*record)\b'
     ]
     for pattern in personal_patterns:
         if re.search(pattern, text):
@@ -45,16 +52,18 @@ def detect_security_indicators(text):
             
     # Credentials (passwords, tokens, api keys, private keys)
     credentials_patterns = [
-        r'(?i)\b(password\w*|passwd\w*|passphrase|db_password|admin_password|database_url|db_url|secret_key|jwt_secret|api_key|apikey|access_key|private_key|token|bearer)\b',
+        r'(?i)\b(password\w*|passwd\w*|passphrase|db_password|admin_password|database_url|db_url|secret_key|jwt_secret|api_key|apikey|access_key|private_key|bearer)\b\s*[:=]\s*[\'"]?[A-Za-z0-9+/=_\-@:\.\/]{4,}["\']?',
         r'-----BEGIN\s+[A-Z ]+\s+PRIVATE\s+KEY-----',
         r'\b(AKIA[0-9A-Z]{16})\b',
-        r'(?i)aws_secret_access_key'
+        r'(?i)aws_secret_access_key',
+        r'\bsk_(?:live|test)_[0-9a-zA-Z]{24}\b',
+        r'\bxox[baprs]-[0-9]{12}-[0-9]{12}-[0-9a-zA-Z]{24}\b'
     ]
     for pattern in credentials_patterns:
         if re.search(pattern, text):
             detected.append("Credentials")
             break
-
+ 
     # Account numbers
     account_patterns = [
         r'(?i)\b(account\s*number|routing\s*number|iban|swift|sort\s*code|bank\s*account)\b',
@@ -64,26 +73,28 @@ def detect_security_indicators(text):
         if re.search(pattern, text):
             detected.append("Account numbers")
             break
-
+ 
     # Government identifiers
     gov_patterns = [
         r'\b\d{3}-\d{2}-\d{4}\b',  # SSN format
-        r'(?i)\b(ssn|social\s*security|national\s*id|driver\'s\s*license|passport|tax\s*id(entification)?)\b'
+        r'(?i)\b(ssn|social\s*security|national\s*id|driver\'s\s*license|tax\s*id(entification)?)\b',
+        r'(?i)\bpassport\s*:\s*[A-Z0-9]{9}\b'
     ]
     for pattern in gov_patterns:
         if re.search(pattern, text):
             detected.append("Government identifiers")
             break
-
-    # Confidential keywords
+ 
+    # Confidential keywords & Corporate terms
     conf_patterns = [
-        r'(?i)\b(confidential|proprietary|internal|trade\s*secret|do\s*not\s*(distribute|share)|restricted|classified|secret)\b'
+        r'(?i)\b(confidential|proprietary|internal|trade\s*secret|do\s*not\s*(distribute|share)|restricted|classified|secret)\b',
+        r'(?i)\b(acquisition\s*draft|board\s*resolution|merger\s*terms|employment\s*agreement|nda|non-disclosure|salary\s*sheet|undisclosed)\b'
     ]
     for pattern in conf_patterns:
         if re.search(pattern, text):
             detected.append("Confidential keywords")
             break
-
+ 
     return detected
 
 def classify_document(text):

@@ -166,5 +166,89 @@ class TestCipherGuardCrypto(unittest.TestCase):
         )
         self.assertEqual(decrypted_v1, plaintext)
 
+    def test_nonce_uniqueness(self):
+        # Asserts that consecutive encryptions using GCM produce unique nonces
+        key = generate_aes_key(256)
+        plaintext = b"Payload sample text"
+        _, iv1, _ = encrypt_aes_gcm(key, plaintext)
+        _, iv2, _ = encrypt_aes_gcm(key, plaintext)
+        self.assertNotEqual(iv1, iv2)
+
+    def test_insecure_rsa_key_size_rejection(self):
+        # Generates a weak 1024-bit RSA key directly (bypassing generate_rsa_keypair check)
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from cryptography.hazmat.backends import default_backend
+        from cryptography.hazmat.primitives import serialization
+        
+        weak_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=1024,
+            backend=default_backend()
+        )
+        weak_pub_pem = weak_key.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        weak_priv_pem = weak_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption()
+        )
+
+        aes_key = generate_aes_key(256)
+        
+        # Wrapping with a weak public key must raise ValueError
+        with self.assertRaises(ValueError) as ctx:
+            encrypt_key_rsa(weak_pub_pem, aes_key)
+        self.assertIn("insecure rsa key size", str(ctx.exception).lower())
+
+        # Unwrapping with a weak private key must raise ValueError
+        with self.assertRaises(ValueError) as ctx:
+            decrypt_key_rsa(weak_priv_pem, b"dummy encrypted key bytes")
+        self.assertIn("insecure rsa key size", str(ctx.exception).lower())
+
+    def test_unsupported_version_rejection(self):
+        # Version 3 is not supported, must raise ValueError
+        with self.assertRaises(ValueError) as ctx:
+            decrypt_by_sensitivity(
+                ciphertext_bytes=b"dummy",
+                sensitivity='Public',
+                encrypted_file_key_b64="YQ==",
+                iv_b64="YQ==",
+                tag_b64="YQ==",
+                user_private_key_pem=self.private_pem,
+                version=3
+            )
+        self.assertIn("unsupported payload encryption version", str(ctx.exception).lower())
+
+    def test_empty_and_large_file_encryption(self):
+        # Empty payload
+        empty_plain = b""
+        res_empty = encrypt_by_sensitivity(empty_plain, 'Public', self.public_pem)
+        dec_empty = decrypt_by_sensitivity(
+            ciphertext_bytes=res_empty["ciphertext"],
+            sensitivity='Public',
+            encrypted_file_key_b64=res_empty["encrypted_file_key"],
+            iv_b64=res_empty["iv_or_nonce"],
+            tag_b64=res_empty["tag"],
+            user_private_key_pem=self.private_pem,
+            version=2
+        )
+        self.assertEqual(dec_empty, empty_plain)
+
+        # Large payload (1MB)
+        large_plain = b"X" * (1024 * 1024)
+        res_large = encrypt_by_sensitivity(large_plain, 'Public', self.public_pem)
+        dec_large = decrypt_by_sensitivity(
+            ciphertext_bytes=res_large["ciphertext"],
+            sensitivity='Public',
+            encrypted_file_key_b64=res_large["encrypted_file_key"],
+            iv_b64=res_large["iv_or_nonce"],
+            tag_b64=res_large["tag"],
+            user_private_key_pem=self.private_pem,
+            version=2
+        )
+        self.assertEqual(dec_large, large_plain)
+
 if __name__ == '__main__':
     unittest.main()

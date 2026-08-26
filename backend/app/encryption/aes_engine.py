@@ -1,8 +1,9 @@
 import os
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
+from app.encryption.constants import AES_KEY_SIZE_BITS, GCM_NONCE_SIZE_BYTES
 
-def generate_aes_key(key_size_bits=256):
+def generate_aes_key(key_size_bits=AES_KEY_SIZE_BITS):
     """
     Generates a cryptographically secure random AES key.
     Supported sizes: 128 or 256 bits.
@@ -16,8 +17,8 @@ def encrypt_aes_gcm(key, plaintext_bytes, associated_data=None):
     Encrypts data using AES-GCM mode.
     Returns: (ciphertext, iv, tag) in raw bytes.
     """
-    # 12 bytes IV is standard for GCM
-    iv = os.urandom(12)
+    # GCM_NONCE_SIZE_BYTES (12 bytes) IV is standard for GCM
+    iv = os.urandom(GCM_NONCE_SIZE_BYTES)
     encryptor = Cipher(
         algorithms.AES(key),
         modes.GCM(iv),

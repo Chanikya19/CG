@@ -116,9 +116,12 @@ class TestCipherGuardAlerts(unittest.TestCase):
         db.session.add(self.class_a)
 
         # Add Integrity
+        import hashlib
+        payload = b"fake encrypted payload bytes"
+        correct_hash = hashlib.sha256(payload).hexdigest()
         self.integ_a = FileIntegrity(
             file_id=self.file_a.id,
-            sha256_hash="stored_hash_sha256_xyz"
+            sha256_hash=correct_hash
         )
         db.session.add(self.integ_a)
 
@@ -139,7 +142,7 @@ class TestCipherGuardAlerts(unittest.TestCase):
         os.makedirs(vault_dir, exist_ok=True)
         self.vault_file_path = os.path.join(vault_dir, "checksum_123.enc")
         with open(self.vault_file_path, "wb") as f:
-            f.write(b"fake encrypted payload bytes")
+            f.write(payload)
 
     def test_alert_condition_multiple_failed_logins(self):
         """1. Tests that 3 failed login attempts locks account and triggers alert."""
@@ -157,8 +160,8 @@ class TestCipherGuardAlerts(unittest.TestCase):
             "email": email,
             "password": "wrong-password"
         })
-        self.assertEqual(res_lock.status_code, 403)
-        self.assertIn("locked", json.loads(res_lock.data)["error"].lower())
+        self.assertEqual(res_lock.status_code, 401)
+        self.assertIn("invalid credentials", json.loads(res_lock.data)["error"].lower())
 
         # Assert SecurityAlert created
         alert = SecurityAlert.query.filter_by(alert_type="Multiple failed login attempts").first()
@@ -292,6 +295,11 @@ class TestCipherGuardAlerts(unittest.TestCase):
         # Setup dummy file for decryption
         with open(self.vault_file_path, "wb") as f:
             f.write(b"fake payload")
+        
+        # Update stored hash to match the new payload bytes
+        import hashlib
+        self.integ_a.sha256_hash = hashlib.sha256(b"fake payload").hexdigest()
+        db.session.commit()
 
         # Mock the decrypt_file_hybrid to return fake bytes
         import unittest.mock as mock
@@ -348,6 +356,73 @@ class TestCipherGuardAlerts(unittest.TestCase):
         # 5. Non-admin attempts to resolve alert2 -> 403 Forbidden
         res_resolve_fail = self.client.post(f"/api/admin/alerts/{alert2.id}/resolve", headers=headers_user)
         self.assertEqual(res_resolve_fail.status_code, 403)
+
+    def test_auth_comprehensive_suite(self):
+        """Tests registration password complexity, logins, expired/invalid tokens, and logouts."""
+        # 1. Successful registration
+        res = self.client.post("/api/register", json={
+            "full_name": "Auth Tester",
+            "email": "authtester@cipherguard.test",
+            "password": "SecurePassword123!"
+        })
+        self.assertEqual(res.status_code, 201)
+        data = json.loads(res.data)
+        self.assertIn("token", data)
+
+        # 2. Weak password rejection
+        # Short password
+        res_short = self.client.post("/api/register", json={
+            "full_name": "Auth Tester",
+            "email": "authtester_weak@cipherguard.test",
+            "password": "Pw1!"
+        })
+        self.assertEqual(res_short.status_code, 400)
+        # Common password
+        res_common = self.client.post("/api/register", json={
+            "full_name": "Auth Tester",
+            "email": "authtester_weak@cipherguard.test",
+            "password": "cipherguard"
+        })
+        self.assertEqual(res_common.status_code, 400)
+
+        # 3. Successful login
+        res_login = self.client.post("/api/login", json={
+            "email": "usera@cipherguard.test",
+            "password": "password"
+        })
+        self.assertEqual(res_login.status_code, 200)
+        data_login = json.loads(res_login.data)
+        self.assertIn("token", data_login)
+
+        # 4. Wrong password
+        res_wrong = self.client.post("/api/login", json={
+            "email": "usera@cipherguard.test",
+            "password": "incorrect-password"
+        })
+        self.assertEqual(res_wrong.status_code, 401)
+        self.assertIn("invalid credentials", json.loads(res_wrong.data)["error"].lower())
+
+        # 5. Invalid JWT (Protected endpoint access)
+        res_invalid_jwt = self.client.get("/api/security-alerts", headers={"Authorization": "Bearer invalid_token"})
+        self.assertEqual(res_invalid_jwt.status_code, 401)
+
+        # 6. Missing JWT
+        res_missing_jwt = self.client.get("/api/security-alerts")
+        self.assertEqual(res_missing_jwt.status_code, 401)
+
+        # 7. Expired JWT
+        import jwt
+        expired_token = jwt.encode(
+            {"exp": datetime.utcnow() - timedelta(hours=1), "sub": self.user_a.id},
+            self.app.config.get('JWT_SECRET'),
+            algorithm="HS256"
+        )
+        res_expired = self.client.get("/api/security-alerts", headers={"Authorization": f"Bearer {expired_token}"})
+        self.assertEqual(res_expired.status_code, 401)
+
+        # 8. Logout endpoint
+        res_logout = self.client.post("/api/logout", headers={"Authorization": f"Bearer {data_login['token']}"})
+        self.assertEqual(res_logout.status_code, 200)
 
 if __name__ == '__main__':
     unittest.main()

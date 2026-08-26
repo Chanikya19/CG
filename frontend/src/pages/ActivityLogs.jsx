@@ -19,6 +19,7 @@ export default function ActivityLogs() {
   const [filterStatus, setFilterStatus] = useState('ALL');
   const [filterUser, setFilterUser] = useState('ALL');
   const [filterAction, setFilterAction] = useState('ALL');
+  const [filterSeverity, setFilterSeverity] = useState('ALL');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -64,7 +65,8 @@ export default function ActivityLogs() {
         startDate,
         endDate,
         page,
-        perPage
+        perPage,
+        filterSeverity
       );
       setLogs(data.logs || []);
       setTotalPages(data.pages || 1);
@@ -79,7 +81,7 @@ export default function ActivityLogs() {
   // Reset page when any filter inputs change
   useEffect(() => {
     setPage(1);
-  }, [searchQuery, filterModule, filterStatus, filterUser, filterAction, startDate, endDate, perPage]);
+  }, [searchQuery, filterModule, filterStatus, filterUser, filterAction, filterSeverity, startDate, endDate, perPage]);
 
   // Load logs on filter change or page navigation
   useEffect(() => {
@@ -88,7 +90,7 @@ export default function ActivityLogs() {
     }, 400);
 
     return () => clearTimeout(delayDebounce);
-  }, [searchQuery, filterModule, filterStatus, filterUser, filterAction, startDate, endDate, page, perPage]);
+  }, [searchQuery, filterModule, filterStatus, filterUser, filterAction, filterSeverity, startDate, endDate, page, perPage]);
 
   const getStatusIcon = (status) => {
     switch (status) {
@@ -250,6 +252,21 @@ export default function ActivityLogs() {
             <option value="FILE_VERIFIED">FILE_VERIFIED</option>
             <option value="FILE_TAMPERED">FILE_TAMPERED</option>
             <option value="UNAUTHORIZED_ACCESS">UNAUTHORIZED_ACCESS</option>
+          </select>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] uppercase font-bold text-gray-500 shrink-0">Severity:</span>
+          <select 
+            value={filterSeverity} 
+            onChange={(e) => setFilterSeverity(e.target.value)}
+            className="w-full py-2 px-3 text-xs rounded-xl glass-input text-gray-300"
+          >
+            <option value="ALL">All Severities</option>
+            <option value="LOW">Low</option>
+            <option value="MEDIUM">Medium</option>
+            <option value="HIGH">High</option>
+            <option value="CRITICAL">Critical</option>
           </select>
         </div>
 

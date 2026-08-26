@@ -183,6 +183,7 @@ class SecurityAlert(db.Model):
     message = db.Column(db.Text, nullable=False)
     ip_address = db.Column(db.String(45), nullable=True, default='0.0.0.0')
     status = db.Column(db.Enum('unresolved', 'resolved'), nullable=False, default='unresolved')
+    resolved_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     # Relationship

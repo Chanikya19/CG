@@ -269,7 +269,12 @@ export default function SecurityReports() {
                       </span>
                     </td>
                     <td className="py-4 text-gray-300 leading-normal max-w-xs">{alert.message}</td>
-                    <td className="py-4 font-mono text-[9px] text-gray-400">{alert.timestamp}</td>
+                    <td className="py-4 font-mono text-[9px] text-gray-400">
+                      <div>Created: {alert.timestamp}</div>
+                      {alert.resolved_at && (
+                        <div className="text-emerald-400 mt-1 font-semibold">Resolved: {alert.resolved_at}</div>
+                      )}
+                    </td>
                     <td className="py-4 font-mono text-[10px] text-gray-500">{alert.ip_address}</td>
                     <td className="py-4 text-right flex items-center justify-end gap-2 mt-1">
                       <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${

@@ -124,5 +124,32 @@ class TestCipherGuardDLP(unittest.TestCase):
         self.assertIn("Confidential keywords", result["detected_indicators"])
         self.assertIn("triggered a safety override", result["explanation"])
 
+    def test_phone_email_indicator_detection(self):
+        # Email address indicator detection
+        indicators = detect_security_indicators("Send an email copy to support@company.org immediately.")
+        self.assertIn("Email addresses", indicators)
+
+        # Phone number indicator detection
+        indicators2 = detect_security_indicators("Call our helpline at +1-555-019-2834 for emergency access.")
+        self.assertIn("Phone numbers", indicators2)
+
+    def test_corrupted_file_error(self):
+        # Corrupted DOCX bytes
+        with self.assertRaises(ValueError) as ctx:
+            extract_text("corrupted.docx", b"this is completely corrupted docx zip container bytes")
+        self.assertIn("corrupted or unreadable", str(ctx.exception))
+
+        # Corrupted PDF bytes
+        with self.assertRaises(ValueError) as ctx:
+            extract_text("corrupted.pdf", b"this is completely corrupted pdf file bytes")
+        self.assertIn("corrupted or unreadable", str(ctx.exception))
+
+    def test_ml_predictions_and_confidence(self):
+        text = "CipherGuard has published a comprehensive API reference guide detailing its public integration endpoints for open source compliance."
+        result = classify_document(text)
+        self.assertIn("ml_confidence", result)
+        self.assertIn("probabilities", result)
+        self.assertTrue(0.0 <= result["ml_confidence"] <= 100.0)
+
 if __name__ == '__main__':
     unittest.main()
