@@ -13,13 +13,16 @@ import {
 } from 'lucide-react';
 import GlassCard from '../components/GlassCard';
 import { auditAPI } from '../services/api';
+import { useToast } from '../components/ToastNotification';
 
 export default function SecurityReports() {
+  const { addToast } = useToast();
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filterSeverity, setFilterSeverity] = useState('ALL');
   const [filterStatus, setFilterStatus] = useState('ALL');
   const [exporting, setExporting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
 
   const currentUser = JSON.parse(sessionStorage.getItem('cipherguard_user') || localStorage.getItem('cipherguard_user') || '{}');
   const isAdmin = currentUser.role === 'admin';
@@ -27,10 +30,14 @@ export default function SecurityReports() {
   const fetchAlerts = async () => {
     try {
       setLoading(true);
+      setErrorMsg('');
       const data = await auditAPI.getSecurityAlerts(filterSeverity, filterStatus);
-      setAlerts(data);
+      setAlerts(data || []);
     } catch (err) {
       console.error(err);
+      const errMsg = 'Failed to fetch security alerts. Please verify connection.';
+      setErrorMsg(errMsg);
+      addToast('error', errMsg);
     } finally {
       setLoading(false);
     }
@@ -96,6 +103,24 @@ export default function SecurityReports() {
       setExporting(false);
     }
   };
+
+  if (errorMsg) {
+    return (
+      <div className="h-[60vh] flex flex-col items-center justify-center gap-4 text-center">
+        <div className="p-4 bg-rose-500/10 text-rose-500 border border-rose-500/25 rounded-full shadow-lg shadow-rose-500/5 animate-pulse">
+          <ShieldAlert className="w-12 h-12" />
+        </div>
+        <h3 className="text-xl font-bold text-white">Threat Center Registry Offline</h3>
+        <p className="text-xs text-gray-400 max-w-sm">Unable to establish connection to the compliance alerts database. Please check connection parameters.</p>
+        <button 
+          onClick={fetchAlerts}
+          className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-xs font-semibold text-white rounded-xl shadow-lg transition-all"
+        >
+          Retry Connection
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 animate-fadeIn printable-area">
@@ -215,9 +240,9 @@ export default function SecurityReports() {
         </div>
 
         {loading ? (
-          <div className="py-20 text-center">
-            <Loader2 className="w-8 h-8 text-purple-500 animate-spin mx-auto" />
-            <p className="text-xs text-gray-500 uppercase mt-2 tracking-widest">Aggregating threat logs...</p>
+          <div className="py-20 flex flex-col items-center justify-center gap-3 text-gray-400">
+            <Loader2 className="w-10 h-10 text-rose-500 animate-spin" />
+            <span className="text-xs uppercase tracking-widest font-bold text-gray-550">Aggregating Threat Register...</span>
           </div>
         ) : filteredAlerts.length > 0 ? (
           <div className="overflow-x-auto">
@@ -257,16 +282,18 @@ export default function SecurityReports() {
                       {isAdmin && alert.status === 'active' && (
                         <button
                           onClick={async () => {
-                            if (window.confirm("Mark this security incident as resolved?")) {
+                            if (window.confirm(`Mark security incident #${alert.id} as resolved?`)) {
                               try {
                                 await auditAPI.resolveSecurityAlert(alert.id);
+                                addToast('success', `Incident #${alert.id} resolved successfully.`);
                                 fetchAlerts();
                               } catch (err) {
-                                alert("Failed to resolve alert: " + (err.response?.data?.error || err.message));
+                                addToast('error', "Failed to resolve alert: " + (err.response?.data?.error || err.message));
                               }
                             }
                           }}
-                          className="px-2 py-0.5 bg-purple-600/30 hover:bg-purple-600/50 border border-purple-500/40 text-purple-200 rounded-lg text-[9px] font-semibold transition-all"
+                          className="px-2 py-1 bg-purple-600/30 hover:bg-purple-600/50 border border-purple-500/40 text-purple-200 rounded-lg text-[9px] font-semibold transition-all focus:ring-2 focus:ring-purple-500 outline-none"
+                          aria-label={`Resolve alert ${alert.id}`}
                         >
                           Resolve
                         </button>
@@ -278,8 +305,14 @@ export default function SecurityReports() {
             </table>
           </div>
         ) : (
-          <div className="py-16 text-center text-gray-500">
-            <p className="text-xs">No matching system alerts recorded.</p>
+          <div className="py-16 text-center text-gray-500 space-y-3 flex flex-col items-center justify-center">
+            <div className="p-3 bg-white/5 border border-gray-800 text-gray-650 rounded-full">
+              <ShieldCheck className="w-8 h-8 text-emerald-400" />
+            </div>
+            <div className="space-y-0.5">
+              <span className="block font-semibold text-gray-400">Zero Active Alerts</span>
+              <span className="block text-[10px] text-gray-600">No security alarms or compliance violations matching criteria.</span>
+            </div>
           </div>
         )}
       </GlassCard>

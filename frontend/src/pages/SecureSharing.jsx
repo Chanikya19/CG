@@ -14,8 +14,10 @@ import {
 } from 'lucide-react';
 import GlassCard from '../components/GlassCard';
 import { shareAPI, auditAPI } from '../services/api';
+import { useToast } from '../components/ToastNotification';
 
 export default function SecureSharing() {
+  const { addToast } = useToast();
   const [filesList, setFilesList] = useState([]);
   const [selectedFile, setSelectedFile] = useState('');
   const [duration, setDuration] = useState('24');
@@ -44,7 +46,9 @@ export default function SecureSharing() {
       setSharingHistory(history);
     } catch (err) {
       console.error(err);
-      setErrorMsg('Failed to load sharing vault registry.');
+      const errMsg = 'Failed to load sharing vault registry.';
+      setErrorMsg(errMsg);
+      addToast('error', errMsg);
     } finally {
       setLoadingFiles(false);
     }
@@ -64,7 +68,9 @@ export default function SecureSharing() {
     try {
       const downloadsLimit = oneTime ? 1 : (maxDownloads ? parseInt(maxDownloads) : null);
       const data = await shareAPI.shareFile(selectedFile, duration, downloadsLimit);
-      setSuccessMsg(`Secure share link generated successfully!`);
+      const successText = 'Secure share link generated successfully!';
+      setSuccessMsg(successText);
+      addToast('success', successText);
       await loadData();
       
       setActiveQrCode(data.qr_code);
@@ -75,7 +81,9 @@ export default function SecureSharing() {
       setOneTime(false);
     } catch (err) {
       console.error(err);
-      setErrorMsg(err.response?.data?.error || 'Failed to authorize sharing policy.');
+      const errMsg = err.response?.data?.error || 'Failed to authorize sharing policy.';
+      setErrorMsg(errMsg);
+      addToast('error', errMsg);
     } finally {
       setSharing(false);
     }
@@ -85,17 +93,22 @@ export default function SecureSharing() {
     try {
       await shareAPI.revokeShare(shareId);
       setSharingHistory(prev => prev.map(s => s.id === shareId ? { ...s, status: 'revoked' } : s));
-      setSuccessMsg('Sharing link revoked successfully.');
+      const successText = 'Sharing link revoked successfully.';
+      setSuccessMsg(successText);
+      addToast('warning', successText);
       setTimeout(() => setSuccessMsg(''), 4000);
     } catch (err) {
       console.error(err);
-      setErrorMsg('Failed to revoke sharing authorization.');
+      const errMsg = 'Failed to revoke sharing authorization.';
+      setErrorMsg(errMsg);
+      addToast('error', errMsg);
     }
   };
 
   const handleCopyLink = (text, id) => {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
+    addToast('success', 'Link copied to clipboard.');
     setTimeout(() => setCopiedId(null), 2000);
   };
 
@@ -235,8 +248,9 @@ export default function SecureSharing() {
             </h3>
 
             {loadingFiles ? (
-              <div className="py-12 text-center text-gray-500">
-                <Loader2 className="w-6 h-6 text-blue-500 animate-spin mx-auto" />
+              <div className="py-16 text-center text-gray-500 flex flex-col items-center justify-center gap-3">
+                <Loader2 className="w-8 h-8 text-purple-500 animate-spin" />
+                <span className="text-xs uppercase font-bold tracking-widest text-gray-500">Syncing Sharing Policies...</span>
               </div>
             ) : sharingHistory.length > 0 ? (
               <div className="overflow-x-auto">
@@ -269,6 +283,7 @@ export default function SecureSharing() {
                                 onClick={() => handleCopyLink(shareLink, share.id)}
                                 className="p-1 hover:bg-white/10 rounded transition-all text-gray-500 hover:text-white"
                                 title="Copy Share Link"
+                                aria-label={`Copy share link for ${share.filename}`}
                               >
                                 {copiedId === share.id ? (
                                   <CheckCircle className="w-3 h-3 text-emerald-400" />
@@ -307,6 +322,7 @@ export default function SecureSharing() {
                                     }}
                                     className="p-1.5 rounded bg-white/5 hover:bg-purple-600/25 border border-gray-800 hover:border-purple-500/20 text-gray-400 hover:text-purple-300 transition-all"
                                     title="View QR Code"
+                                    aria-label={`View QR code for ${share.filename}`}
                                   >
                                     <QrCode className="w-3.5 h-3.5" />
                                   </button>
@@ -314,6 +330,7 @@ export default function SecureSharing() {
                                     onClick={() => handleRevoke(share.id)}
                                     className="p-1.5 rounded bg-white/5 hover:bg-rose-600/25 border border-gray-800 hover:border-rose-500/20 text-gray-400 hover:text-rose-300 transition-all"
                                     title="Revoke Share Link"
+                                    aria-label={`Revoke share link for ${share.filename}`}
                                   >
                                     <Trash2 className="w-3.5 h-3.5" />
                                   </button>
@@ -325,6 +342,7 @@ export default function SecureSharing() {
                                 rel="noreferrer"
                                 className="p-1.5 rounded bg-white/5 hover:bg-blue-600/25 border border-gray-800 hover:border-blue-500/20 text-gray-400 hover:text-blue-300 transition-all inline-block"
                                 title="Open Sharing Resolver"
+                                aria-label={`Open shared download page for ${share.filename}`}
                               >
                                 <ExternalLink className="w-3.5 h-3.5" />
                               </a>
@@ -337,8 +355,14 @@ export default function SecureSharing() {
                 </table>
               </div>
             ) : (
-              <div className="py-16 text-center text-gray-500 space-y-1">
-                <p className="text-xs">No sharing links generated yet.</p>
+              <div className="py-16 text-center text-gray-500 space-y-3 flex flex-col items-center justify-center">
+                <div className="p-3 bg-white/5 border border-gray-800 text-gray-650 rounded-full">
+                  <Share2 className="w-8 h-8" />
+                </div>
+                <div className="space-y-0.5">
+                  <span className="block font-semibold text-gray-450">No Active Share Policies</span>
+                  <span className="block text-[10px] text-gray-650">Secure sharing credentials or files to generate time-bound links.</span>
+                </div>
               </div>
             )}
           </GlassCard>

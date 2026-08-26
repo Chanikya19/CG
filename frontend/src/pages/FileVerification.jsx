@@ -9,21 +9,25 @@ import {
   AlertTriangle,
   Fingerprint,
   CheckCircle,
-  HelpCircle
+  HelpCircle,
+  FileLock2
 } from 'lucide-react';
 import GlassCard from '../components/GlassCard';
 import { auditAPI, integrityAPI } from '../services/api';
+import { useToast } from '../components/ToastNotification';
 
 export default function FileVerification() {
+  const { addToast } = useToast();
   const [files, setFiles] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [checkingId, setCheckingId] = useState(null);
-  const [notification, setNotification] = useState(null);
+  const [errorMsg, setErrorMsg] = useState('');
 
   const fetchFiles = async () => {
     try {
       setLoading(true);
+      setErrorMsg('');
       const data = await auditAPI.getDashboard();
       const formattedFiles = (data.recent_files || []).map(f => ({
         ...f,
@@ -48,13 +52,18 @@ export default function FileVerification() {
             }
             return item;
           }));
+          if (res.status?.toUpperCase() !== 'VERIFIED') {
+            addToast('warning', `WARNING: Integrity mismatch detected in file "${res.filename}"!`);
+          }
         } catch (err) {
           console.error(`Failed to verify file ${f.id} on load`, err);
         }
       });
     } catch (err) {
       console.error(err);
-      showNotification('error', 'Failed to retrieve files from cryptographic vault.');
+      const errMsg = 'Failed to retrieve files from cryptographic vault.';
+      setErrorMsg(errMsg);
+      addToast('error', errMsg);
     } finally {
       setLoading(false);
     }
@@ -63,11 +72,6 @@ export default function FileVerification() {
   useEffect(() => {
     fetchFiles();
   }, []);
-
-  const showNotification = (type, text) => {
-    setNotification({ type, text });
-    setTimeout(() => setNotification(null), 5000);
-  };
 
   const handleVerify = async (fileId) => {
     setCheckingId(fileId);
@@ -86,13 +90,13 @@ export default function FileVerification() {
         return f;
       }));
       if (res.status?.toUpperCase() === 'VERIFIED') {
-        showNotification('success', `Integrity check PASSED for file ${res.filename}.`);
+        addToast('success', `Integrity check PASSED for file "${res.filename}".`);
       } else {
-        showNotification('tampered', `WARNING: Tampering detected for file ${res.filename}!`);
+        addToast('error', `WARNING: Tampering detected for file "${res.filename}"!`);
       }
     } catch (err) {
       console.error(err);
-      showNotification('error', 'Integrity verification request failed.');
+      addToast('error', 'Integrity verification request failed.');
       setFiles(prev => prev.map(f => f.id === fileId ? { ...f, verifiedStatus: 'Error' } : f));
     } finally {
       setCheckingId(null);
@@ -112,16 +116,34 @@ export default function FileVerification() {
         }
         return f;
       }));
-      showNotification('success', 'SHA-256 signature regenerated and saved securely in DB.');
+      addToast('success', 'SHA-256 signature regenerated and saved securely in DB.');
     } catch (err) {
       console.error(err);
-      showNotification('error', 'Failed to generate hash signature.');
+      addToast('error', 'Failed to generate hash signature.');
     }
   };
 
   const filteredFiles = files.filter(f => 
     f.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  if (errorMsg) {
+    return (
+      <div className="h-[60vh] flex flex-col items-center justify-center gap-4 text-center">
+        <div className="p-4 bg-rose-500/10 text-rose-500 border border-rose-500/25 rounded-full shadow-lg shadow-rose-500/5 animate-pulse">
+          <ShieldAlert className="w-12 h-12" />
+        </div>
+        <h3 className="text-xl font-bold text-white">Integrity Vault Registry Offline</h3>
+        <p className="text-xs text-gray-400 max-w-sm">Unable to establish connection to the cryptographic checksum index. Please check connection parameters.</p>
+        <button 
+          onClick={fetchFiles}
+          className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-xs font-semibold text-white rounded-xl shadow-lg transition-all"
+        >
+          Retry Connection
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 animate-fadeIn">
@@ -139,28 +161,11 @@ export default function FileVerification() {
         <button
           onClick={fetchFiles}
           className="flex items-center gap-1.5 px-4 py-2 bg-white/5 hover:bg-white/10 border border-gray-800 rounded-xl text-xs font-semibold text-gray-300 transition-all active:scale-95"
+          aria-label="Refresh checksum registry"
         >
           <RefreshCw className="w-3.5 h-3.5" /> Refresh Registry
         </button>
       </div>
-
-      {/* Floating Status Notification */}
-      {notification && (
-        <div className={`p-4 rounded-2xl border text-xs flex items-center gap-2.5 shadow-xl backdrop-blur-md animate-slideIn fixed top-4 right-4 z-55 max-w-sm ${
-          notification.type === 'success' 
-            ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' 
-            : notification.type === 'tampered'
-            ? 'bg-rose-600/20 border-rose-500/30 text-rose-300 animate-pulse'
-            : 'bg-rose-500/10 border-rose-500/20 text-rose-400'
-        }`}>
-          {notification.type === 'success' ? (
-            <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0" />
-          ) : (
-            <ShieldAlert className="w-5 h-5 text-rose-400 shrink-0" />
-          )}
-          <span>{notification.text}</span>
-        </div>
-      )}
 
       {/* Stats Summary Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -314,8 +319,14 @@ export default function FileVerification() {
             </table>
           </div>
         ) : (
-          <div className="py-16 text-center text-gray-500 space-y-1">
-            <p className="text-xs">No matching files found in current search query.</p>
+          <div className="py-16 text-center text-gray-500 space-y-3 flex flex-col items-center justify-center">
+            <div className="p-3 bg-white/5 border border-gray-800 text-gray-650 rounded-full">
+              <FileLock2 className="w-8 h-8 text-gray-600" />
+            </div>
+            <div className="space-y-0.5 text-center">
+              <span className="block font-semibold text-gray-400">No Checksums Available</span>
+              <span className="block text-[10px] text-gray-655">Verify that your query parameters match, or upload new files to vault.</span>
+            </div>
           </div>
         )}
       </GlassCard>

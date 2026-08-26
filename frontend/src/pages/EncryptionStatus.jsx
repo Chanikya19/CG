@@ -14,8 +14,10 @@ import {
 } from 'lucide-react';
 import GlassCard from '../components/GlassCard';
 import { cryptoAPI } from '../services/api';
+import { useToast } from '../components/ToastNotification';
 
 export default function EncryptionStatus() {
+  const { addToast } = useToast();
   const [keys, setKeys] = useState([
     { id: 'KEY-091A', type: 'Asymmetric (RSA-2048)', name: 'Master Admin KEK', fingerprint: 'sha256:8f:ad:2b:81:4e:c9:0d...', status: 'Active', created: '2026-03-12' },
     { id: 'KEY-241C', type: 'Asymmetric (ECC-256)', name: 'User Ephemeral Exchange', fingerprint: 'sha256:1a:2d:4e:8b:2d:91...', status: 'Active', created: '2026-07-28' },
@@ -32,9 +34,10 @@ export default function EncryptionStatus() {
     async function loadKeys() {
       try {
         const data = await cryptoAPI.getKeys();
-        setRsaKeys(data);
+        setRsaKeys(data || { public_key: '', private_key: '' });
       } catch (err) {
         console.error("Failed to load user cryptographic keys", err);
+        addToast('error', 'Failed to load system keypair files.');
       } finally {
         setLoadingKeys(false);
       }
@@ -46,9 +49,11 @@ export default function EncryptionStatus() {
     setLoadingKeys(true);
     try {
       const data = await cryptoAPI.generateKeys();
-      setRsaKeys(data);
+      setRsaKeys(data || { public_key: '', private_key: '' });
+      addToast('success', 'RSA KEK signature key pair rotated successfully!');
     } catch (err) {
       console.error("Failed to generate user cryptographic keys", err);
+      addToast('error', 'Failed to rotate RSA ciphers keypair.');
     } finally {
       setLoadingKeys(false);
     }
@@ -155,6 +160,23 @@ export default function EncryptionStatus() {
               <Loader2 className="w-6 h-6 text-blue-500 animate-spin" />
               <span className="text-[10px] text-gray-500 uppercase tracking-widest">Generating secure ciphers...</span>
             </div>
+          ) : (!rsaKeys.public_key && !rsaKeys.private_key) ? (
+            <div className="py-6 text-center text-gray-500 space-y-3 flex flex-col items-center justify-center">
+              <div className="p-3 bg-white/5 border border-gray-800 text-gray-650 rounded-full">
+                <AlertTriangle className="w-8 h-8 text-amber-555" />
+              </div>
+              <div className="space-y-0.5">
+                <span className="block font-semibold text-gray-405">No Active Keypair Found</span>
+                <span className="block text-[10px] text-gray-650">An asymmetric key pair is required to secure envelopes in the hybrid cryptosystem.</span>
+              </div>
+              <button 
+                onClick={handleGenerateKeys}
+                className="px-4 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-semibold transition-all focus:ring-2 focus:ring-purple-500 outline-none"
+                aria-label="Generate new system keypair"
+              >
+                Generate Keypair
+              </button>
+            </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="p-4 bg-white/5 border border-gray-800 rounded-2xl space-y-3">
@@ -165,7 +187,8 @@ export default function EncryptionStatus() {
                 <a 
                   href={`data:text/plain;charset=utf-8,${encodeURIComponent(rsaKeys.public_key)}`}
                   download="cipherguard_public.pem"
-                  className="w-full py-2 bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 text-purple-300 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all"
+                  className="w-full py-2 bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 text-purple-300 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all focus:ring-2 focus:ring-purple-500 outline-none"
+                  aria-label="Download Public Key File"
                 >
                   <DownloadCloud className="w-3.5 h-3.5" /> Download Public Key
                 </a>
@@ -179,7 +202,8 @@ export default function EncryptionStatus() {
                 <a 
                   href={`data:text/plain;charset=utf-8,${encodeURIComponent(rsaKeys.private_key)}`}
                   download="cipherguard_private.pem"
-                  className="w-full py-2 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-300 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all"
+                  className="w-full py-2 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-300 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all focus:ring-2 focus:ring-purple-500 outline-none"
+                  aria-label="Download Private Key File"
                 >
                   <DownloadCloud className="w-3.5 h-3.5" /> Download Private Key
                 </a>

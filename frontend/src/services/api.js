@@ -92,11 +92,12 @@ export const dlpAPI = {
     const res = await apiClient.get('/classify/history');
     return res.data;
   },
-  upload: async (formData) => {
+  upload: async (formData, onProgress) => {
     const res = await apiClient.post('/upload', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
+      onUploadProgress: onProgress,
     });
     return res.data;
   }

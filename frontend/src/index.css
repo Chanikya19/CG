@@ -78,6 +78,21 @@ body {
   box-shadow: 0 0 15px rgba(16, 185, 129, 0.1);
 }
 
+.border-glow-rose {
+  border-color: rgba(244, 63, 94, 0.3);
+  box-shadow: 0 0 15px rgba(244, 63, 94, 0.1);
+}
+
+.border-glow-blue {
+  border-color: rgba(59, 130, 246, 0.3);
+  box-shadow: 0 0 15px rgba(59, 130, 246, 0.1);
+}
+
+.border-glow-amber {
+  border-color: rgba(245, 158, 11, 0.3);
+  box-shadow: 0 0 15px rgba(245, 158, 11, 0.1);
+}
+
 /* Cyber grid background effect */
 .cyber-grid {
   background-size: 40px 40px;

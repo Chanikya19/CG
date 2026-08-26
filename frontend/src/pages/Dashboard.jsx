@@ -449,23 +449,26 @@ export default function Dashboard() {
     );
   }
 
+  if (dashboardError) {
+    return (
+      <div className="h-[60vh] flex flex-col items-center justify-center gap-4 text-center">
+        <div className="p-4 bg-rose-500/10 text-rose-500 border border-rose-500/25 rounded-full shadow-lg shadow-rose-500/5 animate-pulse">
+          <ShieldAlert className="w-12 h-12" />
+        </div>
+        <h3 className="text-xl font-bold text-white">Security Command Vault Offline</h3>
+        <p className="text-xs text-gray-400 max-w-sm">Unable to establish connection to the backend telemetry database. Please check connection parameters.</p>
+        <button 
+          onClick={() => window.location.reload()}
+          className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-xs font-semibold text-white rounded-xl shadow-lg transition-all"
+        >
+          Retry Connection
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-8 animate-fadeIn">
-      {dashboardError && (
-        <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-2xl text-xs text-rose-400 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 shrink-0" />
-            <span>{dashboardError}</span>
-          </div>
-          <button 
-            onClick={() => window.location.reload()} 
-            className="px-3 py-1 bg-rose-500/20 hover:bg-rose-500/30 rounded-xl text-white font-medium transition-all"
-          >
-            Retry
-          </button>
-        </div>
-      )}
-
       {/* Top Banner / Welcome */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -481,7 +484,7 @@ export default function Dashboard() {
       </div>
 
       {/* Stats Cards Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-7 gap-4">
         <GlassCard className="flex items-start gap-3 py-3 px-4" glow="blue">
           <div className="p-2.5 bg-blue-500/10 rounded-xl text-blue-400">
             <Users className="w-5 h-5" />
@@ -533,7 +536,7 @@ export default function Dashboard() {
         </GlassCard>
 
         <GlassCard className={`flex items-start gap-3 py-3 px-4 ${dashboardData?.stats?.tampered_files > 0 ? 'border border-rose-500/30' : ''}`} glow={dashboardData?.stats?.tampered_files > 0 ? "rose" : "purple"}>
-          <div className={`p-2.5 rounded-xl ${dashboardData?.stats?.tampered_files > 0 ? 'bg-rose-500/15 text-rose-400' : 'bg-white/5 text-gray-400'}`}>
+          <div className={`p-2.5 rounded-xl ${dashboardData?.stats?.tampered_files > 0 ? 'bg-rose-500/15 text-rose-450 animate-pulse border border-rose-500/20' : 'bg-white/5 text-gray-400'}`}>
             <ShieldAlert className="w-5 h-5" />
           </div>
           <div className="space-y-0.5">
@@ -545,7 +548,7 @@ export default function Dashboard() {
         </GlassCard>
 
         <GlassCard className={`flex items-start gap-3 py-3 px-4 ${dashboardData?.stats?.security_alerts > 0 ? 'border border-rose-500/30' : ''}`} glow={dashboardData?.stats?.security_alerts > 0 ? "rose" : "purple"}>
-          <div className={`p-2.5 rounded-xl ${dashboardData?.stats?.security_alerts > 0 ? 'bg-rose-500/15 text-rose-400' : 'bg-white/5 text-gray-400'}`}>
+          <div className={`p-2.5 rounded-xl ${dashboardData?.stats?.security_alerts > 0 ? 'bg-rose-500/15 text-rose-450 animate-pulse border border-rose-500/20' : 'bg-white/5 text-gray-400'}`}>
             <AlertTriangle className="w-5 h-5" />
           </div>
           <div className="space-y-0.5">
@@ -1058,13 +1061,28 @@ export default function Dashboard() {
                         </td>
                       </tr>
                     ))
-                  ) : (
-                    <tr>
-                      <td colSpan={8} className="py-8 text-center text-gray-500 text-xs">
-                        No documents secured in key vault yet.
-                      </td>
-                    </tr>
-                  )}
+                    ) : (
+                      <tr>
+                        <td colSpan={8} className="py-12 text-center text-gray-500 text-xs">
+                          <div className="flex flex-col items-center gap-3 py-4">
+                            <div className="p-3 rounded-full bg-white/5 border border-gray-800 text-gray-600">
+                              <FileLock2 className="w-8 h-8" />
+                            </div>
+                            <div className="space-y-0.5">
+                              <span className="block font-semibold text-gray-400">Vault Registry Empty</span>
+                              <span className="block text-[10px] text-gray-600">No documents secured in key vault yet.</span>
+                            </div>
+                            <button 
+                              onClick={() => navigate('/upload')}
+                              className="mt-1 px-4 py-1.5 bg-purple-600/20 hover:bg-purple-600/35 border border-purple-500/30 text-purple-300 rounded-lg text-[10px] font-bold transition-all focus:ring-2 focus:ring-purple-500 outline-none"
+                              aria-label="Secure first file in vault"
+                            >
+                              Secure Your First File
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
                 </tbody>
               </table>
             </div>

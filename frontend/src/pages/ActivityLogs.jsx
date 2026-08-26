@@ -276,9 +276,9 @@ export default function ActivityLogs() {
 
       <GlassCard className="p-0 overflow-hidden">
         {loading ? (
-          <div className="py-20 flex flex-col items-center justify-center gap-2 text-gray-400">
-            <Loader2 className="w-8 h-8 text-purple-500 animate-spin" />
-            <span className="text-xs uppercase tracking-widest text-gray-500">Querying audit logs database...</span>
+          <div className="py-20 flex flex-col items-center justify-center gap-3 text-gray-400">
+            <Loader2 className="w-10 h-10 text-purple-500 animate-spin" />
+            <span className="text-xs uppercase tracking-widest font-bold text-gray-550">Querying Audit Trail Registry...</span>
           </div>
         ) : (
           <div>
@@ -320,7 +320,15 @@ export default function ActivityLogs() {
                   ) : (
                     <tr>
                       <td colSpan={9} className="p-8 text-center text-gray-500">
-                        No audit records matching parameters.
+                        <div className="flex flex-col items-center justify-center gap-3 py-8">
+                          <div className="p-3 bg-white/5 border border-gray-800 text-gray-650 rounded-full">
+                            <FileText className="w-8 h-8" />
+                          </div>
+                          <div className="space-y-0.5 text-center">
+                            <span className="block font-semibold text-gray-400">No Matching Audit Logs</span>
+                            <span className="block text-[10px] text-gray-650">Modify your filtering parameters or search query to locate items.</span>
+                          </div>
+                        </div>
                       </td>
                     </tr>
                   )}

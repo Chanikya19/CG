@@ -1,5 +1,6 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { ToastProvider } from './components/ToastNotification';
 
 // Layout
 import DashboardLayout from './layout/DashboardLayout';
@@ -25,8 +26,10 @@ import Settings from './pages/Settings';
 
 export default function App() {
   return (
-    <Router>
-      <Routes>
+    <ToastProvider>
+      <Router>
+        <Routes>
+
         {/* Auth Routes (Unauthenticated Layout) */}
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
@@ -126,6 +129,7 @@ export default function App() {
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
-    </Router>
+      </Router>
+    </ToastProvider>
   );
 }

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { 
   Shield, 
@@ -15,13 +15,16 @@ import {
   Globe,
   ShieldCheck,
   BarChart3,
-  AlertTriangle
+  AlertTriangle,
+  Menu,
+  X
 } from 'lucide-react';
 import { authAPI } from '../services/api';
 
 export default function DashboardLayout({ children }) {
   const location = useLocation();
   const navigate = useNavigate();
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   
   const userString = localStorage.getItem('cipherguard_user') || sessionStorage.getItem('cipherguard_user');
   const user = userString ? JSON.parse(userString) : null;
@@ -46,24 +49,52 @@ export default function DashboardLayout({ children }) {
     navigate('/login');
   };
 
+  const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
+  const closeSidebar = () => setIsSidebarOpen(false);
+
   return (
     <div className="min-h-screen flex text-gray-100 bg-[#030712] cyber-grid">
+      {/* Backdrop overlay on mobile */}
+      {isSidebarOpen && (
+        <div 
+          onClick={closeSidebar}
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-20 lg:hidden transition-opacity duration-300"
+          aria-hidden="true"
+        />
+      )}
+
       {/* Sidebar */}
-      <aside className="w-64 glass-panel border-r border-gray-800 flex flex-col justify-between p-4 sticky top-0 h-screen z-10">
+      <aside 
+        className={`w-64 glass-panel border-r border-gray-800 flex flex-col justify-between p-4 fixed lg:sticky top-0 h-screen z-30 transition-transform duration-300 ${
+          isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+        }`}
+        aria-label="Sidebar navigation"
+        aria-hidden={!isSidebarOpen}
+      >
         <div>
           {/* Logo */}
-          <div className="flex items-center gap-3 px-3 py-4 mb-6">
-            <div className="p-2 bg-gradient-to-tr from-purple-600 to-blue-500 rounded-xl shadow-lg border border-purple-400/20">
-              <Shield className="w-6 h-6 text-white" />
+          <div className="flex items-center justify-between px-3 py-4 mb-6">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-gradient-to-tr from-purple-600 to-blue-500 rounded-xl shadow-lg border border-purple-400/20">
+                <Shield className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <span className="text-xl font-bold tracking-tight text-white">Cipher<span className="text-purple-400">Guard</span></span>
+                <span className="block text-[10px] text-gray-500 font-mono tracking-widest uppercase">Intelligent DLP</span>
+              </div>
             </div>
-            <div>
-              <span className="text-xl font-bold tracking-tight text-white">Cipher<span className="text-purple-400">Guard</span></span>
-              <span className="block text-[10px] text-gray-500 font-mono tracking-widest uppercase">Intelligent DLP</span>
-            </div>
+            {/* Close button on mobile */}
+            <button 
+              onClick={closeSidebar}
+              className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-all lg:hidden"
+              aria-label="Close sidebar menu"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
 
           {/* Menu Items */}
-          <nav className="space-y-1">
+          <nav className="space-y-1" role="navigation">
             {menuItems.map((item) => {
               const Icon = item.icon;
               const isActive = location.pathname === item.path || (item.path === '/dashboard' && location.pathname.startsWith('/file-details'));
@@ -71,6 +102,7 @@ export default function DashboardLayout({ children }) {
                 <Link
                   key={item.name}
                   to={item.path}
+                  onClick={closeSidebar}
                   className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group relative ${
                     isActive 
                       ? 'bg-gradient-to-r from-purple-600/20 to-blue-600/10 border-l-4 border-purple-500 text-white font-medium' 
@@ -106,6 +138,7 @@ export default function DashboardLayout({ children }) {
           <button 
             onClick={handleLogout}
             className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-gray-400 hover:text-rose-400 hover:bg-rose-500/5 transition-all text-sm font-medium"
+            aria-label="Log out of session"
           >
             <LogOut className="w-4 h-4" />
             <span>Terminate Session</span>
@@ -114,29 +147,42 @@ export default function DashboardLayout({ children }) {
       </aside>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-h-screen">
+      <div className="flex-1 flex flex-col min-h-screen w-full overflow-hidden">
         {/* Top Navbar */}
-        <header className="h-16 glass-panel border-b border-gray-800 flex items-center justify-between px-8 sticky top-0 z-10">
+        <header className="h-16 glass-panel border-b border-gray-800 flex items-center justify-between px-4 sm:px-8 sticky top-0 z-10">
           <div className="flex items-center gap-3">
-            <span className="text-sm text-gray-400 font-medium">Network Health:</span>
+            {/* Hamburger trigger on mobile */}
+            <button 
+              onClick={toggleSidebar}
+              className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-all lg:hidden"
+              aria-label="Toggle navigation menu"
+              aria-expanded={isSidebarOpen}
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+            <span className="text-sm text-gray-400 font-medium hidden sm:inline">Network Health:</span>
             <span className="px-2 py-0.5 text-xs rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5">
-              <Globe className="w-3 h-3 inline animate-pulse" /> Threat Level Low
+              <Globe className="w-3 h-3 inline animate-pulse" /> <span className="hidden xs:inline">Threat Level</span> Low
             </span>
           </div>
 
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-4 sm:gap-6">
             {/* Search */}
-            <div className="relative">
+            <div className="relative hidden md:block">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
               <input 
                 type="text" 
                 placeholder="Search audit trail or file vault..." 
-                className="pl-9 pr-4 py-1.5 text-xs w-60 rounded-lg glass-input text-gray-300 focus:w-80"
+                className="pl-9 pr-4 py-1.5 text-xs w-48 lg:w-60 rounded-lg glass-input text-gray-300 focus:w-64 lg:focus:w-80 transition-all"
+                aria-label="Search"
               />
             </div>
 
             {/* Notification triggers */}
-            <button className="relative p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-all">
+            <button 
+              className="relative p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-all"
+              aria-label="Open notifications"
+            >
               <Bell className="w-4 h-4" />
               <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-purple-500 ring-2 ring-gray-950"></span>
             </button>
@@ -145,14 +191,14 @@ export default function DashboardLayout({ children }) {
 
             {/* Status indicators */}
             <div className="flex items-center gap-2">
-              <span className="text-xs text-gray-400">Keys Secured:</span>
+              <span className="text-xs text-gray-400 hidden xs:inline">Keys Secured:</span>
               <span className="text-xs font-mono font-bold text-purple-400">14 Active</span>
             </div>
           </div>
         </header>
 
         {/* View Port Content */}
-        <main className="flex-1 p-8 overflow-y-auto max-w-7xl w-full mx-auto">
+        <main className="flex-1 p-4 sm:p-8 overflow-y-auto max-w-7xl w-full mx-auto">
           {children}
         </main>
       </div>
