@@ -71,6 +71,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 .venv/
+.venv-local/
 venv/
 env/
 ENV/

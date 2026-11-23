@@ -20,6 +20,7 @@ import {
   X
 } from 'lucide-react';
 import { authAPI } from '../services/api';
+import NotificationCenter from '../components/NotificationCenter';
 
 export default function DashboardLayout({ children }) {
   const location = useLocation();
@@ -191,13 +192,7 @@ export default function DashboardLayout({ children }) {
             </div>
 
             {/* Notification triggers */}
-            <button 
-              className="relative p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-all"
-              aria-label="Open notifications"
-            >
-              <Bell className="w-4 h-4" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-purple-500 ring-2 ring-gray-950"></span>
-            </button>
+            <NotificationCenter />
 
             <div className="h-6 w-px bg-gray-800"></div>
 

@@ -311,4 +311,26 @@ The primary system administrator is provisioned idempotently during the applicat
 - **Client-Side Menu Obfuscation**: Sidebar links for system-wide auditing and reporting are hidden for non-admin accounts.
 - **Verification Boundaries**: Role checks occur entirely on the server-side, querying user properties straight from the database context instead of trusting JWT claims or client local storage objects.
 
+---
+
+## 🔔 Security Alert & Notification Center
+
+CipherGuard incorporates a role-aware real-time Security Alert and Notification Center for users and administrative operators.
+
+### Security Severity & Event Levels Enforced
+
+| Severity | Category | Target Audience | Trigger Events |
+| :---: | :--- | :---: | :--- |
+| **INFO** | `SHARING` | User | Successful creation of a share link, shared file download |
+| **LOW** | `SHARING` / `INTEGRITY` | User | Shared links expiring or manually revoked, file verification checks |
+| **MEDIUM** | `AUTHENTICATION` / `AI_CLASSIFICATION` | User & Admin | Multiple failed login attempts, Confidential/Secret file detection |
+| **HIGH** | `AUTHENTICATION` / `ENCRYPTION` | User & Admin | Account lockouts, repeated decryption failures |
+| **CRITICAL** | `INTEGRITY` / `ACCOUNT_SECURITY` | User & Admin | File tampering detection, unauthorized admin API accesses |
+
+### Notification Lifecycle & State Controls
+- **Personal Center**: Users query their own unread alerts badge (`GET /api/notifications`) and dismiss them via patch queries (`PATCH /api/notifications/<id>/read`), secured against IDOR.
+- **Admin Center**: Administrative accounts review global alerts (`GET /api/admin/alerts`), filters by severity/categories, and change alert status to `resolved` (`PATCH /api/admin/alerts/<id>/resolve`), which automatically records administrative audit events.
+- **Deduplication Engine**: Unresolved alerts of the same type and context within a 5-minute time window are merged by the backend to prevent notification spam.
+
+
 

@@ -30,7 +30,7 @@ import AdminDashboard from './pages/AdminDashboard';
 export default function App() {
   return (
     <ToastProvider>
-      <Router>
+      <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <Routes>
 
         {/* Auth Routes (Unauthenticated Layout) */}

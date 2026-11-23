@@ -215,4 +215,39 @@ export const auditAPI = {
   }
 };
 
+export const notificationsAPI = {
+  getNotifications: async () => {
+    const res = await apiClient.get('/notifications');
+    return res.data;
+  },
+  getUnreadCount: async () => {
+    const res = await apiClient.get('/notifications/unread-count');
+    return res.data;
+  },
+  markRead: async (alertId) => {
+    const res = await apiClient.patch(`/notifications/${alertId}/read`);
+    return res.data;
+  },
+  markAllRead: async () => {
+    const res = await apiClient.patch('/notifications/read-all');
+    return res.data;
+  },
+  getAdminAlerts: async (severity = 'ALL', category = 'ALL', status = 'ALL', eventType = 'ALL') => {
+    const res = await apiClient.get(`/admin/alerts?severity=${severity}&category=${category}&status=${status}&event_type=${eventType}`);
+    return res.data;
+  },
+  getAdminUnreadCount: async () => {
+    const res = await apiClient.get('/admin/alerts/unread-count');
+    return res.data;
+  },
+  markAdminRead: async (alertId) => {
+    const res = await apiClient.patch(`/admin/alerts/${alertId}/read`);
+    return res.data;
+  },
+  resolveAdminAlert: async (alertId) => {
+    const res = await apiClient.patch(`/admin/alerts/${alertId}/resolve`);
+    return res.data;
+  }
+};
+
 export default apiClient;

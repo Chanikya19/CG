@@ -41,4 +41,13 @@ text,label
 "CipherGuard has published a comprehensive API reference guide detailing its public integration endpoints for open source compliance.",Public
 "Draft minutes from internal board meeting discussing Q4 corporate restructuring, proprietary strategy documents, and confidential salary ranges.",Confidential
 "Private asymmetric key credentials database backup log: SSH private key -----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ==\n-----END OPENSSH PRIVATE KEY-----",Secret
-
+"CipherGuard verification document. Project: Hybrid Encryption Validation. Status: Public test document.",Public
+"General software verification report. Test project completed successfully with no sensitive fields.",Public
+"The public QA plan describes automated browser checks and API availability tests.",Public
+"Release notes for the latest public build include feature summaries and installation steps.",Public
+"Product documentation explains setup procedures for the open source verification environment.",Public
+"Community test report: the application loaded successfully and all public pages were reachable.",Public
+"This document summarizes standard project status updates for the general engineering team.",Public
+"Public workshop agenda: registration details, schedule, speakers, and demonstration topics.",Public
+"Open source migration guide for developers, including examples and recommended configurations.",Public
+"General support article covering account navigation and public documentation links.",Public

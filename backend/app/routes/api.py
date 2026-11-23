@@ -28,7 +28,15 @@ from app.controllers.api_controller import (
     get_statistics_endpoint,
     logout_endpoint,
     get_users_list,
-    resolve_security_alert_endpoint
+    resolve_security_alert_endpoint,
+    get_user_notifications,
+    get_user_unread_count,
+    mark_notification_read,
+    mark_all_notifications_read,
+    get_admin_alerts,
+    get_admin_unread_count,
+    mark_admin_alert_read,
+    resolve_admin_alert
 )
 
 api_bp = Blueprint('api', __name__)
@@ -80,5 +88,21 @@ api_bp.route('/logs', methods=['GET'])(token_required(get_activity_logs))
 api_bp.route('/profile', methods=['GET'])(token_required(get_user_profile))
 api_bp.route('/security-alerts', methods=['GET'])(token_required(get_security_alerts_endpoint))
 api_bp.route('/statistics', methods=['GET'])(token_required(get_statistics_endpoint))
+
+# User Notifications Center (Secured)
+api_bp.route('/notifications', methods=['GET'])(token_required(get_user_notifications))
+api_bp.route('/notifications/unread-count', methods=['GET'])(token_required(get_user_unread_count))
+api_bp.route('/notifications/<int:alert_id>/read', methods=['PATCH'])(token_required(mark_notification_read))
+api_bp.route('/notifications/read-all', methods=['PATCH'])(token_required(mark_all_notifications_read))
+
+# Admin Security Alerts Center (Secured & Admin Only)
+api_bp.route('/admin/alerts', methods=['GET'])(token_required(admin_required(get_admin_alerts)))
+api_bp.route('/admin/alerts/unread-count', methods=['GET'])(token_required(admin_required(get_admin_unread_count)))
+api_bp.route('/admin/alerts/<int:alert_id>/read', methods=['PATCH'])(token_required(admin_required(mark_admin_alert_read)))
+@api_bp.route('/admin/alerts/<int:alert_id>/resolve', methods=['PATCH'])
+@token_required
+@admin_required
+def resolve_admin_alert_route(current_user, alert_id):
+    return resolve_admin_alert(current_user, alert_id)
 
 

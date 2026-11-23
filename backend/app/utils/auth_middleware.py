@@ -158,15 +158,16 @@ def admin_required(f):
     @wraps(f)
     def decorated(current_user, *args, **kwargs):
         if current_user.role != 'admin':
-            alert = SecurityAlert(
+            from app.controllers.api_controller import trigger_security_alert
+            trigger_security_alert(
                 user_id=current_user.id,
                 alert_type='Unauthorized admin access',
                 severity='HIGH',
                 message=f"Operator {current_user.email} (role: {current_user.role}) attempted to access administrative resource.",
-                ip_address=request.remote_addr,
-                status='unresolved'
+                category='ACCOUNT_SECURITY',
+                target_role='admin',
+                event_type='UNAUTHORIZED_ADMIN_ACCESS'
             )
-            db.session.add(alert)
             log = ActivityLog(
                 user_id=current_user.id,
                 action='UNAUTHORIZED_ACCESS',
